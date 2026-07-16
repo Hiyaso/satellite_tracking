@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>現代化衛星追蹤儀 - 戰術升級版</title>
+    
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
+        #globeViz { width: 100vw; height: 100vh; }
+        
+        /* GUI 控制面板樣式 (移除可能干擾的 position 設定，讓 lil-gui 自己接管) */
+        .lil-gui {
+            --background-color: rgba(10, 15, 25, 0.9);
+            --text-color: #00ffcc;
+            --title-background-color: rgba(5, 10, 15, 0.95);
+            --widget-color: rgba(20, 30, 40, 0.8);
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            /* 讓選單稍微離開邊緣 */
+            margin-top: 15px;
+            margin-right: 15px;
+        }
+
+        /* 網頁上的過境資訊 HUD */
+        #pass-hud {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 380px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(5, 12, 20, 0.85);
+            border: 1px solid #00ffcc;
+            border-left: 4px solid #00ffcc;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+            color: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            backdrop-filter: blur(8px);
+            z-index: 999;
+            display: none; 
+        }
+        #pass-hud h3 { margin: 0 0 10px 0; color: #00ffcc; font-size: 16px; letter-spacing: 1px; border-bottom: 1px solid rgba(0,255,204,0.3); padding-bottom: 5px; }
+        .pass-item { margin-bottom: 10px; font-size: 13px; line-height: 1.5; color: #ccc; background: rgba(255,255,255,0.05); padding: 8px; border-radius: 4px; }
+        .pass-item span { color: #fff; font-weight: bold; }
+        .pass-item .highlight { color: #39ff14; } 
+
+        .station-label { color: #00ffcc; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #00ffcc; margin-top: -30px; margin-left: -20px; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <div id="globeViz"></div>
+    
+    <div id="pass-hud">
+        <h3 id="hud-title">📡 過境預測資料</h3>
+        <div id="hud-content">正在等待指令...</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.18"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"></script>
+
+    <script>
+        const tleDatabase = {
+            'ISS (國際太空站)': {
+                line1: '1 25544U 98067A   24159.52083333  .00016717  00000-0  10270-3 0  9011',
+                line2: '2 25544  51.6428 123.4567 0001234  45.6789  89.0123 15.49234567423456'
+            },
+            'NOAA 19 (氣象衛星)': {
+                line1: '1 33591U 09005A   24160.12345678  .00000123  00000-0  12345-4 0  9991',
+                line2: '2 33591  99.1234 123.4567 0012345  45.6789  89.0123 14.1234567812345'
+            },
+            'Custom (自訂 TLE)': { line1: '', line2: '' }
+        };
+
+        // 1. 初始化 3D 地球
+        const world = Globe()(document.getElementById('globeViz'))
+            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg') 
+            .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+            .showAtmosphere(true)
+            .atmosphereColor('#4facfe')
+            .atmosphereAltitude(0.15)
+            .pathColor(() => 'rgba(57, 255, 20, 0.6)') 
+            .pathDashLength(0.1)
+            .pathDashGap(0.005)
+            .pathDashAnimateTime(12000); 
+
+        // 加入打光，確保這段程式碼順利執行
+        const scene = world.scene();
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); 
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        // 台北地面站
+        world.htmlElementsData([{ lat: 25.0330, lng: 121.5654, name: 'Taipei Station' }])
+            .htmlElement(d => {
+                const el = document.createElement('div');
+                el.innerHTML = `<div style="font-size: 20px; text-align: center;">📍</div><div class="station-label">${d.name}</div>`;
+                return el;
+            });
+
+        // 2. 實時衛星軌道計算
+        let currentSatrec = null;
+        
+        function updateRealTimeOrbit(line1, line2) {
+            if (!line1 || !line2) {
+                world.pointsData([]); world.pathsData([]); return;
+            }
+            try {
+                currentSatrec = satellite.twoline2satrec(line1, line2);
+            } catch (e) {
+                console.error('TLE 格式錯誤'); return;
+            }
+
+            const pathCoords = [];
+            for(let i = 0; i <= 90; i += 2) {
+                const t = new Date(Date.now() + i * 60000);
+                const pv = satellite.propagate(currentSatrec, t);
+                if (pv.position && pv.position.x !== undefined) {
+                    const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(t));
+                    pathCoords.push([satellite.degreesLat(gd.latitude), satellite.degreesLong(gd.longitude), gd.height/6371]);
+                }
+            }
+            world.pathsData([{ coords: pathCoords }]);
+        }
+
+        setInterval(() => {
+            if (!currentSatrec) return;
+            const pv = satellite.propagate(currentSatrec, new Date());
+            if (pv.position && pv.position.x !== undefined) {
+                const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(new Date()));
+                const lat = satellite.degreesLat(gd.latitude);
+                const lng = satellite.degreesLong(gd.longitude);
+                const alt = gd.height / 6371; 
+                
+                world.pointsData([{ lat: lat, lng: lng, alt: alt }])
+                     .pointAltitude('alt').pointColor(() => '#39ff14').pointRadius(0.2).pointResolution(32);
+            }
+        }, 1000);
+
+        // 3. 確保 GUI 正確建立
+        const gui = new lil.GUI({ title: '🛰️ 衛星控制台' });
+        
+        const myConfig = {
+            satelliteName: 'ISS (國際太空站)',
+            line1: tleDatabase['ISS (國際太空站)'].line1,
+            line2: tleDatabase['ISS (國際太空站)'].line2,
+            
+            fetchPass: function() { 
+                // ⚠️ 替換成你的 OCI IP 和後端 Port
+                const ociBackendUrl = 'http://<您的OCI_VM_外網IP>:8000/api/next-pass';
+                const hud = document.getElementById('pass-hud');
+                const hudContent = document.getElementById('hud-content');
+                
+                hud.style.display = 'block';
+                document.getElementById('hud-title').innerText = `📡 運算中: ${this.satelliteName}...`;
+                hudContent.innerHTML = `<span style="color: #ffaa00;">正在向 OCI 伺服器請求軌道數據...</span>`;
+                
+                fetch(ociBackendUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: this.satelliteName, line1: this.line1, line2: this.line2 })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if(data.status === 'error') throw new Error(data.message);
+                    
+                    document.getElementById('hud-title').innerText = `✅ ${data.satellite} 過境預測`;
+                    if(data.passes.length === 0) {
+                        hudContent.innerHTML = `未來三天內無有效過境。`; return;
+                    }
+                    
+                    let htmlStr = '';
+                    data.passes.forEach((p, idx) => {
+                        htmlStr += `
+                            <div class="pass-item">
+                                <div>🚀 <b>Pass #${idx+1}</b></div>
+                                <div>升起: <span>${p.rise}</span></div>
+                                <div><span class="highlight">最高點: ${p.culminate}</span></div>
+                                <div>落下: <span>${p.set}</span></div>
+                            </div>
+                        `;
+                    });
+                    hudContent.innerHTML = htmlStr;
+                })
+                .catch(err => {
+                    hudContent.innerHTML = `<span style="color: red;">❌ 連線失敗或 TLE 格式錯誤<br>${err}</span>`;
+                });
+            }
+        };
+
+        // 綁定選單
+        gui.add(myConfig, 'satelliteName', Object.keys(tleDatabase)).name('選擇衛星').onChange(name => {
+            myConfig.line1 = tleDatabase[name].line1;
+            myConfig.line2 = tleDatabase[name].line2;
+            
+            line1Ctrl.disable(name !== 'Custom (自訂 TLE)');
+            line2Ctrl.disable(name !== 'Custom (自訂 TLE)');
+            
+            updateRealTimeOrbit(myConfig.line1, myConfig.line2);
+        });
+
+        const line1Ctrl = gui.add(myConfig, 'line1').name('TLE Line 1').disable().onFinishChange(v => updateRealTimeOrbit(v, myConfig.line2));
+        const line2Ctrl = gui.add(myConfig, 'line2').name('TLE Line 2').disable().onFinishChange(v => updateRealTimeOrbit(myConfig.line1, v));
+        gui.add(myConfig, 'fetchPass').name('📊 計算過境時間面板');
+
+        // 預設啟動
+        updateRealTimeOrbit(myConfig.line1, myConfig.line2);
+        world.pointOfView({ lat: 25.0330, lng: 121.5654, altitude: 2.5 }, 2000);
+    </script>
+</body>
+</html>
