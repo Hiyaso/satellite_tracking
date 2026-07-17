@@ -26,7 +26,7 @@ All commands below are run from the `satellite_tracking/` project root.
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
-pip install -r requirements.txt
+pip install -r config/requirements.txt
 ```
 
 ## `src/acu.py` — command-line az/el calculator
