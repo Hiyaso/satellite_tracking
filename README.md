@@ -10,10 +10,10 @@ Tools for tracking a satellite's position from a ground station:
 
 ```
 satellite_tracking/
-├── src/            # acu.py, app.py, index.html
-├── data/           # JSON output written by acu.py --output
-├── config/         # configuration files
-└── requirements.txt
+├── src/                    # acu.py, app.py, index.html
+├── data/                   # JSON output written by acu.py --output
+└── config/
+    └── requirements.txt    # Python dependencies
 ```
 
 All commands below are run from the `satellite_tracking/` project root.
@@ -21,7 +21,14 @@ All commands below are run from the `satellite_tracking/` project root.
 ## Requirements
 
 - Python 3.9+
-- Dependencies in `requirements.txt`
+- Dependencies in `config/requirements.txt`:
+
+  | Package | Used by | Purpose |
+  |---|---|---|
+  | `skyfield==1.54` | `src/acu.py` | Orbital mechanics / az-el computation |
+  | `sgp4==2.27` | `src/acu.py` | TLE and GP (OMM) propagation, parses JSON/XML/CSV element sets |
+  | `flask==3.1.3` | `src/app.py` | Web API server |
+  | `flask-cors==6.0.5` | `src/app.py` | CORS support so `index.html` can call the API from a browser |
 
 ```bash
 python -m venv .venv
