@@ -205,6 +205,11 @@ def main() -> None:
         default=60.0,
         help="Step size in seconds between samples when --day is set (default: 60)",
     )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Write the result to this file as JSON instead of (or in addition to) printing it",
+    )
     args = parser.parse_args()
 
     when = _parse_when(args.when)
@@ -243,6 +248,19 @@ def main() -> None:
         for row in rows:
             time_str = row["time"].isoformat(timespec="seconds")
             print(f"{time_str}  az={row['azimuth_deg']:7.2f}  el={row['elevation_deg']:7.2f}")
+
+        if args.output:
+            json_rows = [
+                {
+                    "time": row["time"].isoformat(timespec="seconds"),
+                    "azimuth_deg": row["azimuth_deg"],
+                    "elevation_deg": row["elevation_deg"],
+                }
+                for row in rows
+            ]
+            with open(args.output, "w", encoding="utf-8") as f:
+                json.dump(json_rows, f, indent=2)
+            print(f"# Wrote {len(json_rows)} samples to {args.output}")
     else:
         if gp_fields is not None:
             result = calculate_az_el_from_gp(
@@ -262,6 +280,11 @@ def main() -> None:
                 when,
             )
         print(result)
+
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2)
+            print(f"# Wrote result to {args.output}")
 
 
 if __name__ == "__main__":
