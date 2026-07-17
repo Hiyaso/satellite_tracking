@@ -3,7 +3,7 @@ from flask_cors import CORS
 from skyfield.api import load, wgs84, EarthSatellite
 from datetime import datetime, timezone
 
-from acu import calculate_az_el_from_tle
+from satellite_tracking.src.acu import calculate_az_el_from_tle
 
 app = Flask(__name__)
 CORS(app)  

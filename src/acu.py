@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 from sgp4 import omm
 from skyfield.api import EarthSatellite, load, wgs84
+
+# Project layout is <root>/src/acu.py and <root>/data/, so resolve the data
+# directory relative to this file rather than the current working directory.
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def calculate_az_el_from_tle(
@@ -208,9 +213,22 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        help="Write the result to this file as JSON instead of (or in addition to) printing it",
+        help=(
+            "Write the result to this file as JSON instead of (or in addition to) printing it. "
+            f"Relative paths are placed under {DATA_DIR} (default: {DATA_DIR / 'azel.json'} when "
+            "--output is given without a value)"
+        ),
+        nargs="?",
+        const="azel.json",
     )
     args = parser.parse_args()
+
+    output_path: Optional[Path] = None
+    if args.output:
+        output_path = Path(args.output)
+        if not output_path.is_absolute():
+            output_path = DATA_DIR / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
     when = _parse_when(args.when)
 
@@ -249,7 +267,7 @@ def main() -> None:
             time_str = row["time"].isoformat(timespec="seconds")
             print(f"{time_str}  az={row['azimuth_deg']:7.2f}  el={row['elevation_deg']:7.2f}")
 
-        if args.output:
+        if output_path:
             json_rows = [
                 {
                     "time": row["time"].isoformat(timespec="seconds"),
@@ -258,9 +276,9 @@ def main() -> None:
                 }
                 for row in rows
             ]
-            with open(args.output, "w", encoding="utf-8") as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(json_rows, f, indent=2)
-            print(f"# Wrote {len(json_rows)} samples to {args.output}")
+            print(f"# Wrote {len(json_rows)} samples to {output_path}")
     else:
         if gp_fields is not None:
             result = calculate_az_el_from_gp(
@@ -281,10 +299,10 @@ def main() -> None:
             )
         print(result)
 
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
+        if output_path:
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2)
-            print(f"# Wrote result to {args.output}")
+            print(f"# Wrote result to {output_path}")
 
 
 if __name__ == "__main__":
