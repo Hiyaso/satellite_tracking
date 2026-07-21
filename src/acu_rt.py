@@ -86,8 +86,8 @@ def track_realtime(
 
 # Sample ISS TLE, used as a default so the script can run without CLI args.
 # Real usage should pass an up-to-date TLE via --line1/--line2.
-_SAMPLE_TLE_LINE1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9994"
-_SAMPLE_TLE_LINE2 = "2 25544  51.6416 339.6867 0007976  35.0698  50.6355 15.50357350 39984"
+_SAMPLE_TLE_LINE1 = "1 37606U 11022B   26201.84964429 -.00000211  00000-0  00000-0 0  9990"
+_SAMPLE_TLE_LINE2 = "2 37606   0.0080   7.8156 0001539 129.3280 195.3606  1.00267838 55614"
 
 
 def main() -> None:

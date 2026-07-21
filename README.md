@@ -4,6 +4,7 @@ Tools for tracking a satellite's position from a ground station:
 
 - **`src/acu.py`** — command-line tool that computes azimuth/elevation for a satellite from a TLE or GP (OMM) element set, either at a single instant or swept across a 24-hour period, with optional JSON export.
 - **`src/acu_rt.py`** — real-time az/el tracker; continuously prints the satellite's live position until stopped.
+- **`src/fetch_tle.py`** — downloads the latest GP (OMM) element set for a satellite from CelesTrak and saves it to `data/`.
 - **`src/app.py`** — Flask API that exposes next-pass predictions and az/el lookups over HTTP.
 - **`src/index.html`** — 3D globe visualization (globe.gl / three.js) with a control panel and pass-prediction HUD, driven by the Flask API.
 
@@ -11,8 +12,8 @@ Tools for tracking a satellite's position from a ground station:
 
 ```
 satellite_tracking/
-├── src/                    # acu.py, acu_rt.py, app.py, index.html
-├── data/                   # JSON output written by acu.py --output
+├── src/                    # acu.py, acu_rt.py, fetch_tle.py, app.py, index.html
+├── data/                   # JSON output written by acu.py --output and fetch_tle.py
 └── config/
     └── requirements.txt    # Python dependencies
 ```
@@ -151,6 +152,66 @@ python src/acu_rt.py --gp-file iss.json --interval 5
 | `--duration` | Stop after this many seconds (default: run until Ctrl+C) |
 
 Note: `acu_rt.py` always tracks the real current time — there's no `--when` or `--output`; use `acu.py` for a specific timestamp, a 24-hour sweep, or JSON export.
+
+## `src/fetch_tle.py` — refresh GP/TLE data from CelesTrak
+
+Downloads the latest GP (OMM) element set for a satellite from CelesTrak by NORAD catalog number and saves it as JSON under `data/`, ready to hand to `--gp-file` on `acu.py` or `acu_rt.py`.
+
+### Basic usage
+
+```bash
+# Fetches the ISS (NORAD 25544) by default -> data/gp_25544.json
+python src/fetch_tle.py
+```
+
+### Fetch a different satellite
+
+```bash
+python src/fetch_tle.py --norad-id 33591 --output noaa19.json
+```
+
+Then use the result:
+
+```bash
+python src/acu.py --gp-file data/gp_25544.json --day --output azel.json
+python src/acu_rt.py --gp-file data/gp_25544.json
+```
+
+### All options
+
+| Flag | Description |
+|---|---|
+| `--norad-id` | NORAD catalog number to fetch (default: 25544, the ISS) |
+| `--output`, `-o` | Output filename under `data/` (default: `gp_<norad-id>.json`) |
+
+### Keeping it fresh automatically
+
+CelesTrak updates most GP data every few hours, so refreshing twice a day keeps propagation error low without hammering the API. On Windows, schedule it with Task Scheduler:
+
+```powershell
+$venvPython  = "C:\path\to\satellite_tracking\.venv\Scripts\python.exe"
+$scriptPath  = "C:\path\to\satellite_tracking\src\fetch_tle.py"
+$projectRoot = "C:\path\to\satellite_tracking"
+
+$Action   = New-ScheduledTaskAction -Execute $venvPython -Argument "`"$scriptPath`"" -WorkingDirectory $projectRoot
+$Trigger1 = New-ScheduledTaskTrigger -Daily -At 00:00
+$Trigger2 = New-ScheduledTaskTrigger -Daily -At 12:00
+
+Register-ScheduledTask -TaskName "SatelliteTracking-FetchTLE" `
+    -Action $Action -Trigger @($Trigger1, $Trigger2) `
+    -Description "Fetch latest ISS TLE (NORAD 25544) from CelesTrak, twice daily" `
+    -RunLevel Limited
+```
+
+This runs while you're logged in (no stored credentials needed). Check on it with:
+
+```powershell
+Start-ScheduledTask -TaskName "SatelliteTracking-FetchTLE"   # run once now
+Get-ScheduledTaskInfo -TaskName "SatelliteTracking-FetchTLE" # last run time/result
+Unregister-ScheduledTask -TaskName "SatelliteTracking-FetchTLE" -Confirm:$false  # remove
+```
+
+On Linux/macOS, use a cron entry instead, e.g. `0 0,12 * * * /path/to/.venv/bin/python /path/to/src/fetch_tle.py`.
 
 ## `src/app.py` — API server
 
