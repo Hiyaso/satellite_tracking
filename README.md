@@ -3,6 +3,7 @@
 Tools for tracking a satellite's position from a ground station:
 
 - **`src/acu.py`** — command-line tool that computes azimuth/elevation for a satellite from a TLE or GP (OMM) element set, either at a single instant or swept across a 24-hour period, with optional JSON export.
+- **`src/acu_rt.py`** — real-time az/el tracker; continuously prints the satellite's live position until stopped.
 - **`src/app.py`** — Flask API that exposes next-pass predictions and az/el lookups over HTTP.
 - **`src/index.html`** — 3D globe visualization (globe.gl / three.js) with a control panel and pass-prediction HUD, driven by the Flask API.
 
@@ -10,7 +11,7 @@ Tools for tracking a satellite's position from a ground station:
 
 ```
 satellite_tracking/
-├── src/                    # acu.py, app.py, index.html
+├── src/                    # acu.py, acu_rt.py, app.py, index.html
 ├── data/                   # JSON output written by acu.py --output
 └── config/
     └── requirements.txt    # Python dependencies
@@ -107,6 +108,49 @@ If the file contains multiple satellites, the first one is used.
 | `--day` | Sweep 24 hours starting at `--when` instead of a single point |
 | `--step-seconds` | Interval between samples when `--day` is set (default: 60) |
 | `--output`, `-o` | Write the result as JSON. Relative paths go under `data/` (default filename `azel.json` if no path given) |
+
+## `src/acu_rt.py` — real-time az/el tracker
+
+Continuously recalculates and prints the satellite's azimuth/elevation for the current time, refreshing in place on a fixed interval, until you stop it with Ctrl+C (or `--duration` elapses).
+
+### Basic usage
+
+```bash
+python src/acu_rt.py
+```
+
+### Custom satellite, ground station, and refresh rate
+
+```bash
+python src/acu_rt.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --lon 121.5654 --interval 1
+```
+
+### Stop automatically after a fixed duration
+
+```bash
+python src/acu_rt.py --duration 30
+```
+
+### Use a GP (OMM) element set instead of a TLE
+
+Same as `acu.py` — pass `--gp-file` (and optionally `--gp-format`):
+
+```bash
+python src/acu_rt.py --gp-file iss.json --interval 5
+```
+
+### All options
+
+| Flag | Description |
+|---|---|
+| `--line1`, `--line2` | TLE lines (default: sample ISS TLE) |
+| `--gp-file` | GP/OMM element file to use instead of `--line1`/`--line2` |
+| `--gp-format` | `json`, `xml`, or `csv` (default: inferred from file extension) |
+| `--lat`, `--lon`, `--elev` | Ground station latitude/longitude (degrees) and elevation (meters) |
+| `--interval` | Seconds between live updates (default: 1) |
+| `--duration` | Stop after this many seconds (default: run until Ctrl+C) |
+
+Note: `acu_rt.py` always tracks the real current time — there's no `--when` or `--output`; use `acu.py` for a specific timestamp, a 24-hour sweep, or JSON export.
 
 ## `src/app.py` — API server
 
