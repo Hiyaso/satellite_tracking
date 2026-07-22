@@ -32,9 +32,17 @@ All commands below are run from the `satellite_tracking/` project root.
   | `flask==3.1.3` | `src/app.py` | Web API server |
   | `flask-cors==6.0.5` | `src/app.py` | CORS support so `index.html` can call the API from a browser |
 
+Windows Python Environment Setup
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
+pip install -r config/requirements.txt
+```
+
+Ubuntu Python Environment Setup
+```bash
+python -m venv .venv
+source .venv\bin\activate        # Windows
 pip install -r config/requirements.txt
 ```
 
