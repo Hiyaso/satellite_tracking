@@ -1,217 +1,1028 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>現代化衛星追蹤儀 - 戰術升級版</title>
-    
-    <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
-        #globeViz { width: 100vw; height: 100vh; }
-        
-        /* GUI 控制面板樣式 (移除可能干擾的 position 設定，讓 lil-gui 自己接管) */
-        .lil-gui {
-            --background-color: rgba(10, 15, 25, 0.9);
-            --text-color: #00ffcc;
-            --title-background-color: rgba(5, 10, 15, 0.95);
-            --widget-color: rgba(20, 30, 40, 0.8);
-            border: 1px solid rgba(0, 255, 204, 0.3);
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-            /* 讓選單稍微離開邊緣 */
-            margin-top: 15px;
-            margin-right: 15px;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACU Console — Az/El Generator</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121924;
+    --panel-2: #172232;
+    --line: #24344a;
+    --text: #dbe6f3;
+    --muted: #8397b0;
+    --accent: #35e0c3;
+    --accent-dim: #1d7f70;
+    --warn: #ffb454;
+    --bad: #ff6b6b;
+    --ok: #6ee787;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .status { margin-left: auto; font-size: 12px; color: var(--muted); }
 
-        /* 網頁上的過境資訊 HUD */
-        #pass-hud {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            width: 380px;
-            max-height: 400px;
-            overflow-y: auto;
-            background: rgba(5, 12, 20, 0.85);
-            border: 1px solid #00ffcc;
-            border-left: 4px solid #00ffcc;
-            box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
-            color: #fff;
-            padding: 15px;
-            border-radius: 4px;
-            backdrop-filter: blur(8px);
-            z-index: 999;
-            display: none; 
-        }
-        #pass-hud h3 { margin: 0 0 10px 0; color: #00ffcc; font-size: 16px; letter-spacing: 1px; border-bottom: 1px solid rgba(0,255,204,0.3); padding-bottom: 5px; }
-        .pass-item { margin-bottom: 10px; font-size: 13px; line-height: 1.5; color: #ccc; background: rgba(255,255,255,0.05); padding: 8px; border-radius: 4px; }
-        .pass-item span { color: #fff; font-weight: bold; }
-        .pass-item .highlight { color: #39ff14; } 
+  .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
 
-        .station-label { color: #00ffcc; font-weight: bold; font-size: 14px; text-shadow: 0 0 8px #00ffcc; margin-top: -30px; margin-left: -20px; pointer-events: none; }
-    </style>
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .panel > h2 {
+    margin: 0; padding: 10px 14px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border-bottom: 1px solid var(--line);
+  }
+  .panel > .body { padding: 12px 14px; }
+
+  fieldset { border: 0; margin: 0 0 14px; padding: 0; }
+  fieldset > legend {
+    padding: 0 0 6px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  label > span { display: block; margin-bottom: 3px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+
+  input, select, textarea, button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent-dim); border-color: var(--accent-dim); }
+  textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; resize: vertical; }
+  input[type="checkbox"] { width: auto; margin-right: 6px; vertical-align: -2px; }
+
+  button {
+    cursor: pointer; background: var(--panel-2); transition: background .15s, border-color .15s;
+  }
+  button:hover:not(:disabled) { background: #1f2d40; border-color: var(--accent-dim); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: #04120f; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--accent); }
+  .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+  .btn-small { font-size: 12px; padding: 4px 8px; }
+
+  .tabs { display: flex; gap: 4px; padding: 8px 14px 0; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    width: auto; border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+    border-bottom-color: transparent; font-size: 12px; color: var(--muted);
+  }
+  .tabs button.active { color: var(--accent); border-color: var(--line); border-bottom-color: var(--panel); background: var(--panel); }
+  .tab-body { display: none; padding: 12px 14px; }
+  .tab-body.active { display: block; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .stat .k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .stat .v { font-size: 18px; font-variant-numeric: tabular-nums; }
+
+  .plots { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 1100px) { .plots { grid-template-columns: 1fr; } }
+  canvas { width: 100%; background: #0d141d; border: 1px solid var(--line); border-radius: 6px; display: block; }
+
+  .table-wrap { max-height: 460px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+  th, td { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid #1b2635; }
+  th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); font-weight: 500; text-align: right; z-index: 1; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.below td { color: #64788f; }
+  tr.violation td { background: rgba(255, 107, 107, .08); }
+  .flag { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 3px; background: #22314a; }
+  .flag-BELOW_MASK { background: #223247; color: var(--muted); }
+  .flag-AZ_LIMIT, .flag-EL_LIMIT { background: #4a1f1f; color: var(--bad); }
+  .flag-AZ_RATE, .flag-EL_RATE { background: #4a3a1a; color: var(--warn); }
+
+  .live { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .live .stat .v { font-size: 26px; color: var(--accent); }
+  .live .stat .v.small { font-size: 20px; }
+
+  .map-wrap { position: relative; margin-bottom: 12px; }
+  #map { background: #0a1420; }
+  .map-legend {
+    position: absolute; left: 10px; bottom: 10px; display: flex; gap: 12px; flex-wrap: wrap;
+    font-size: 11px; color: var(--muted); background: rgba(11, 15, 20, .72);
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; pointer-events: none;
+  }
+  .map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+  .pass-list { display: grid; gap: 8px; }
+  .pass {
+    background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 5px; padding: 8px 10px; font-size: 12px;
+  }
+  .pass .when { color: var(--accent); font-weight: 600; }
+  .pass .detail { color: var(--muted); }
+
+  .msg { padding: 8px 10px; border-radius: 5px; font-size: 12px; margin-bottom: 10px; display: none; }
+  .msg.error { display: block; background: #3a1a1a; border: 1px solid #6b2b2b; color: #ffc9c9; }
+  .msg.info { display: block; background: #16303a; border: 1px solid #245362; color: #b3e6f2; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .hint { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+</style>
 </head>
 <body>
 
-    <div id="globeViz"></div>
-    
-    <div id="pass-hud">
-        <h3 id="hud-title">📡 過境預測資料</h3>
-        <div id="hud-content">正在等待指令...</div>
+<header>
+  <h1>ACU Console</h1>
+  <span class="sub">Antenna Control Unit parameter setup &rarr; azimuth / elevation output</span>
+  <span class="status" id="server-status">checking server…</span>
+</header>
+
+<div class="layout">
+
+  <!-- ================= Parameter panel ================= -->
+  <form class="panel" id="params">
+    <h2>ACU Parameters</h2>
+    <div class="body">
+
+      <fieldset>
+        <legend>Satellite / Element set</legend>
+        <label>
+          <span>Source</span>
+          <select id="sat-mode">
+            <option value="gp_file">GP/OMM file in data/</option>
+            <option value="tle">Manual TLE</option>
+            <option value="norad">Fetch from CelesTrak (NORAD ID)</option>
+          </select>
+        </label>
+
+        <div data-mode="gp_file">
+          <label>
+            <span>Element file</span>
+            <select id="gp-file"></select>
+          </label>
+          <div class="btn-row">
+            <button type="button" class="btn-small" id="reload-files">Reload list</button>
+          </div>
+        </div>
+
+        <div data-mode="tle" hidden>
+          <label><span>Name</span><input id="sat-name" placeholder="ISS (ZARYA)"></label>
+          <label><span>TLE line 1</span><textarea id="line1" rows="2" spellcheck="false"></textarea></label>
+          <label><span>TLE line 2</span><textarea id="line2" rows="2" spellcheck="false"></textarea></label>
+        </div>
+
+        <div data-mode="norad" hidden>
+          <label><span>NORAD catalog number</span><input id="norad-id" type="number" value="25544"></label>
+          <div class="btn-row">
+            <button type="button" class="btn-small" id="fetch-tle">Fetch &amp; save to data/</button>
+          </div>
+          <p class="hint">Downloads the current element set from CelesTrak when you generate, reusing it for two minutes.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Ground station</legend>
+        <label><span>Name</span><input id="st-name" value="Taipei"></label>
+        <div class="row">
+          <label><span>Latitude °</span><input id="st-lat" type="number" step="any" value="25.0330"></label>
+          <label><span>Longitude °</span><input id="st-lon" type="number" step="any" value="121.5654"></label>
+        </div>
+        <label><span>Elevation (m)</span><input id="st-elev" type="number" step="any" value="0"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Time window</legend>
+        <label>
+          <span>Start (UTC, blank = now)</span>
+          <input id="w-start" type="datetime-local" step="1">
+        </label>
+        <div class="row">
+          <label><span>Duration (min)</span><input id="w-duration" type="number" step="any" value="180"></label>
+          <label><span>Step (s)</span><input id="w-step" type="number" step="any" value="10"></label>
+        </div>
+        <label style="color:var(--text)">
+          <input type="checkbox" id="visible-only">Only output samples above the mask
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Pedestal limits &amp; biases</legend>
+        <label><span>Elevation mask °</span><input id="acu-mask" type="number" step="any" value="10"></label>
+        <div class="row">
+          <label><span>Az offset °</span><input id="acu-az-off" type="number" step="any" value="0"></label>
+          <label><span>El offset °</span><input id="acu-el-off" type="number" step="any" value="0"></label>
+        </div>
+        <div class="row">
+          <label><span>Az travel min °</span><input id="acu-az-min" type="number" step="any" value="-270"></label>
+          <label><span>Az travel max °</span><input id="acu-az-max" type="number" step="any" value="270"></label>
+        </div>
+        <div class="row">
+          <label><span>El min °</span><input id="acu-el-min" type="number" step="any" value="0"></label>
+          <label><span>El max °</span><input id="acu-el-max" type="number" step="any" value="90"></label>
+        </div>
+        <div class="row">
+          <label><span>Max az rate °/s</span><input id="acu-az-rate" type="number" step="any" value="5"></label>
+          <label><span>Max el rate °/s</span><input id="acu-el-rate" type="number" step="any" value="3"></label>
+        </div>
+      </fieldset>
+
+      <div class="btn-row">
+        <button type="submit" class="primary" id="generate">Generate Az/El</button>
+        <button type="button" id="live-toggle">Live</button>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn-small" id="save-preset">Save preset</button>
+        <button type="button" class="btn-small" id="reset-preset">Reset</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- ================= Output panel ================= -->
+  <section class="panel">
+    <div class="tabs">
+      <button type="button" data-tab="track" class="active">Track</button>
+      <button type="button" data-tab="table">Data</button>
+      <button type="button" data-tab="passes">Passes</button>
+      <button type="button" data-tab="live">Live</button>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://unpkg.com/globe.gl"></script>
-    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.18"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"></script>
+    <div class="tab-body active" id="tab-track">
+      <div class="msg" id="track-msg"></div>
+      <div class="stats" id="summary"></div>
+      <div class="plots">
+        <div>
+          <canvas id="sky" width="640" height="640"></canvas>
+          <p class="hint">Sky view — north up, east right; rings every 30° elevation. Grey = below mask.</p>
+        </div>
+        <div>
+          <canvas id="timeline" width="1200" height="640"></canvas>
+          <p class="hint">Commanded az (cyan, left axis) and el (green, right axis) versus time.</p>
+        </div>
+      </div>
+    </div>
 
-    <script>
-        const tleDatabase = {
-            'ISS (國際太空站)': {
-                line1: '1 25544U 98067A   24159.52083333  .00016717  00000-0  10270-3 0  9011',
-                line2: '2 25544  51.6428 123.4567 0001234  45.6789  89.0123 15.49234567423456'
-            },
-            'NOAA 19 (氣象衛星)': {
-                line1: '1 33591U 09005A   24160.12345678  .00000123  00000-0  12345-4 0  9991',
-                line2: '2 33591  99.1234 123.4567 0012345  45.6789  89.0123 14.1234567812345'
-            },
-            'Custom (自訂 TLE)': { line1: '', line2: '' }
-        };
+    <div class="tab-body" id="tab-table">
+      <div class="btn-row" style="margin-bottom:10px">
+        <button type="button" class="btn-small" id="dl-csv">Download CSV</button>
+        <button type="button" class="btn-small" id="dl-json">Download JSON</button>
+        <span class="hint" id="table-note" style="margin:auto 0 auto 8px"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="data-table">
+          <thead><tr>
+            <th>Time (UTC)</th><th>Az °</th><th>El °</th><th>Cmd Az °</th><th>Cmd El °</th>
+            <th>Az rate °/s</th><th>El rate °/s</th><th>Range km</th><th>Flags</th>
+          </tr></thead>
+          <tbody><tr><td colspan="9" class="empty">No data yet — set parameters and generate.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
 
-        // 1. 初始化 3D 地球
-        const world = Globe()(document.getElementById('globeViz'))
-            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg') 
-            .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
-            .showAtmosphere(true)
-            .atmosphereColor('#4facfe')
-            .atmosphereAltitude(0.15)
-            .pathColor(() => 'rgba(57, 255, 20, 0.6)') 
-            .pathDashLength(0.1)
-            .pathDashGap(0.005)
-            .pathDashAnimateTime(12000); 
+    <div class="tab-body" id="tab-passes">
+      <div class="pass-list" id="pass-list"><div class="empty">No passes computed yet.</div></div>
+    </div>
 
-        // 加入打光，確保這段程式碼順利執行
-        const scene = world.scene();
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); 
-        directionalLight.position.set(1, 1, 1);
-        scene.add(directionalLight);
+    <div class="tab-body" id="tab-live">
+      <div class="msg" id="live-msg"></div>
+      <div class="map-wrap">
+        <canvas id="map" width="1200" height="600"></canvas>
+        <div class="map-legend">
+          <span><i style="background:#35e0c3"></i>ground track ahead</span>
+          <span><i style="background:#1d7f70"></i>track behind</span>
+          <span><i style="background:#ffb454"></i>footprint above mask</span>
+          <span><i style="background:#6ee787"></i>station</span>
+        </div>
+      </div>
+      <div class="live" id="live-readout">
+        <div class="stat"><div class="k">Azimuth</div><div class="v" id="lv-az">—</div></div>
+        <div class="stat"><div class="k">Elevation</div><div class="v" id="lv-el">—</div></div>
+        <div class="stat"><div class="k">Cmd Az</div><div class="v" id="lv-caz">—</div></div>
+        <div class="stat"><div class="k">Cmd El</div><div class="v" id="lv-cel">—</div></div>
+        <div class="stat"><div class="k">Range</div><div class="v" id="lv-rng">—</div></div>
+        <div class="stat"><div class="k">State</div><div class="v" id="lv-state">IDLE</div></div>
+        <div class="stat"><div class="k">Sub-lat</div><div class="v small" id="lv-slat">—</div></div>
+        <div class="stat"><div class="k">Sub-lon</div><div class="v small" id="lv-slon">—</div></div>
+        <div class="stat"><div class="k">Altitude</div><div class="v small" id="lv-alt">—</div></div>
+      </div>
+      <p class="hint" id="lv-time">Press <b>Live</b> to poll the current position and look angles once per second.</p>
+    </div>
+  </section>
+</div>
 
-        // 台北地面站
-        world.htmlElementsData([{ lat: 25.0330, lng: 121.5654, name: 'Taipei Station' }])
-            .htmlElement(d => {
-                const el = document.createElement('div');
-                el.innerHTML = `<div style="font-size: 20px; text-align: center;">📍</div><div class="station-label">${d.name}</div>`;
-                return el;
-            });
+<script src="world.js"></script>
+<script>
+const API = location.protocol.startsWith('http') ? '' : 'http://127.0.0.1:8000';
+const $ = (id) => document.getElementById(id);
+const PRESET_KEY = 'acu-console-params';
 
-        // 2. 實時衛星軌道計算
-        let currentSatrec = null;
-        
-        function updateRealTimeOrbit(line1, line2) {
-            if (!line1 || !line2) {
-                world.pointsData([]); world.pathsData([]); return;
-            }
-            try {
-                currentSatrec = satellite.twoline2satrec(line1, line2);
-            } catch (e) {
-                console.error('TLE 格式錯誤'); return;
-            }
+let lastResult = null;
+let lastLive = null;
+let liveTimer = null;
 
-            const pathCoords = [];
-            for(let i = 0; i <= 90; i += 2) {
-                const t = new Date(Date.now() + i * 60000);
-                const pv = satellite.propagate(currentSatrec, t);
-                if (pv.position && pv.position.x !== undefined) {
-                    const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(t));
-                    pathCoords.push([satellite.degreesLat(gd.latitude), satellite.degreesLong(gd.longitude), gd.height/6371]);
-                }
-            }
-            world.pathsData([{ coords: pathCoords }]);
-        }
+/* ---------------- parameter collection ---------------- */
 
-        setInterval(() => {
-            if (!currentSatrec) return;
-            const pv = satellite.propagate(currentSatrec, new Date());
-            if (pv.position && pv.position.x !== undefined) {
-                const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(new Date()));
-                const lat = satellite.degreesLat(gd.latitude);
-                const lng = satellite.degreesLong(gd.longitude);
-                const alt = gd.height / 6371; 
-                
-                world.pointsData([{ lat: lat, lng: lng, alt: alt }])
-                     .pointAltitude('alt').pointColor(() => '#39ff14').pointRadius(0.2).pointResolution(32);
-            }
-        }, 1000);
+function collect() {
+  const mode = $('sat-mode').value;
+  const gpValue = $('gp-file').value || '';
+  const [gpFileName, gpIndex] = gpValue.split('|');
 
-        // 3. 確保 GUI 正確建立
-        const gui = new lil.GUI({ title: '🛰️ 衛星控制台' });
-        
-        const myConfig = {
-            satelliteName: 'ISS (國際太空站)',
-            line1: tleDatabase['ISS (國際太空站)'].line1,
-            line2: tleDatabase['ISS (國際太空站)'].line2,
-            
-            fetchPass: function() { 
-                // ⚠️ 替換成你的 OCI IP 和後端 Port
-                const ociBackendUrl = 'http://<您的OCI_VM_外網IP>:8000/api/next-pass';
-                const hud = document.getElementById('pass-hud');
-                const hudContent = document.getElementById('hud-content');
-                
-                hud.style.display = 'block';
-                document.getElementById('hud-title').innerText = `📡 運算中: ${this.satelliteName}...`;
-                hudContent.innerHTML = `<span style="color: #ffaa00;">正在向 OCI 伺服器請求軌道數據...</span>`;
-                
-                fetch(ociBackendUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: this.satelliteName, line1: this.line1, line2: this.line2 })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if(data.status === 'error') throw new Error(data.message);
-                    
-                    document.getElementById('hud-title').innerText = `✅ ${data.satellite} 過境預測`;
-                    if(data.passes.length === 0) {
-                        hudContent.innerHTML = `未來三天內無有效過境。`; return;
-                    }
-                    
-                    let htmlStr = '';
-                    data.passes.forEach((p, idx) => {
-                        htmlStr += `
-                            <div class="pass-item">
-                                <div>🚀 <b>Pass #${idx+1}</b></div>
-                                <div>升起: <span>${p.rise}</span></div>
-                                <div><span class="highlight">最高點: ${p.culminate}</span></div>
-                                <div>落下: <span>${p.set}</span></div>
-                            </div>
-                        `;
-                    });
-                    hudContent.innerHTML = htmlStr;
-                })
-                .catch(err => {
-                    hudContent.innerHTML = `<span style="color: red;">❌ 連線失敗或 TLE 格式錯誤<br>${err}</span>`;
-                });
-            }
-        };
+  return {
+    satellite: {
+      mode,
+      name: $('sat-name').value,
+      line1: $('line1').value,
+      line2: $('line2').value,
+      gp_file: gpFileName,
+      gp_index: Number(gpIndex || 0),
+      norad_id: Number($('norad-id').value),
+    },
+    station: {
+      name: $('st-name').value,
+      lat: Number($('st-lat').value),
+      lon: Number($('st-lon').value),
+      elevation_m: Number($('st-elev').value),
+    },
+    window: {
+      start: $('w-start').value ? $('w-start').value + 'Z' : '',
+      duration_minutes: Number($('w-duration').value),
+      step_seconds: Number($('w-step').value),
+    },
+    acu: {
+      min_elevation_deg: Number($('acu-mask').value),
+      az_offset_deg: Number($('acu-az-off').value),
+      el_offset_deg: Number($('acu-el-off').value),
+      az_min_deg: Number($('acu-az-min').value),
+      az_max_deg: Number($('acu-az-max').value),
+      el_min_deg: Number($('acu-el-min').value),
+      el_max_deg: Number($('acu-el-max').value),
+      max_az_rate_dps: Number($('acu-az-rate').value),
+      max_el_rate_dps: Number($('acu-el-rate').value),
+    },
+    visible_only: $('visible-only').checked,
+  };
+}
 
-        // 綁定選單
-        gui.add(myConfig, 'satelliteName', Object.keys(tleDatabase)).name('選擇衛星').onChange(name => {
-            myConfig.line1 = tleDatabase[name].line1;
-            myConfig.line2 = tleDatabase[name].line2;
-            
-            line1Ctrl.disable(name !== 'Custom (自訂 TLE)');
-            line2Ctrl.disable(name !== 'Custom (自訂 TLE)');
-            
-            updateRealTimeOrbit(myConfig.line1, myConfig.line2);
+function applyPreset(p) {
+  if (!p) return;
+  const set = (id, v) => { if (v !== undefined && v !== null) $(id).value = v; };
+  set('sat-mode', p.satellite?.mode);
+  set('sat-name', p.satellite?.name);
+  set('line1', p.satellite?.line1);
+  set('line2', p.satellite?.line2);
+  set('norad-id', p.satellite?.norad_id);
+  set('st-name', p.station?.name);
+  set('st-lat', p.station?.lat);
+  set('st-lon', p.station?.lon);
+  set('st-elev', p.station?.elevation_m);
+  set('w-duration', p.window?.duration_minutes);
+  set('w-step', p.window?.step_seconds);
+  set('acu-mask', p.acu?.min_elevation_deg);
+  set('acu-az-off', p.acu?.az_offset_deg);
+  set('acu-el-off', p.acu?.el_offset_deg);
+  set('acu-az-min', p.acu?.az_min_deg);
+  set('acu-az-max', p.acu?.az_max_deg);
+  set('acu-el-min', p.acu?.el_min_deg);
+  set('acu-el-max', p.acu?.el_max_deg);
+  set('acu-az-rate', p.acu?.max_az_rate_dps);
+  set('acu-el-rate', p.acu?.max_el_rate_dps);
+  $('visible-only').checked = !!p.visible_only;
+  syncModeVisibility();
+  return p.satellite?.gp_file;
+}
+
+/* ---------------- API helpers ---------------- */
+
+async function api(path, body) {
+  const res = await fetch(API + path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server returned ${res.status} (not JSON)`); }
+  if (!res.ok || data.status === 'error') throw new Error(data.message || `HTTP ${res.status}`);
+  return data;
+}
+
+function showMsg(el, text, kind = 'error') {
+  el.className = 'msg ' + kind;
+  el.textContent = text;
+  if (!text) el.className = 'msg';
+}
+
+/* ---------------- rendering ---------------- */
+
+function renderSummary(result) {
+  const s = result.summary, sat = result.satellite;
+  const cells = [
+    ['Satellite', sat.name || '—'],
+    ['Samples', s.samples ?? 0],
+    ['Above mask', `${s.visible_samples ?? 0} (${s.visible_percent ?? 0}%)`],
+    ['Max elevation', fmt(s.max_elevation_deg, 2) + '°'],
+    ['Min range', fmt(s.min_range_km, 0) + ' km'],
+    ['Peak az rate', fmt(s.peak_az_rate_dps, 3) + ' °/s'],
+    ['Peak el rate', fmt(s.peak_el_rate_dps, 3) + ' °/s'],
+    ['Limit hits', s.violations ?? 0],
+  ];
+  $('summary').innerHTML = cells.map(([k, v]) =>
+    `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+
+const fmt = (v, d = 2) => (v === undefined || v === null || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+
+function renderTable(samples) {
+  const tbody = $('data-table').querySelector('tbody');
+  const LIMIT = 3000;
+  const shown = samples.slice(0, LIMIT);
+  $('table-note').textContent = samples.length > LIMIT
+    ? `showing first ${LIMIT} of ${samples.length} rows — download for the full set`
+    : `${samples.length} rows`;
+
+  if (!shown.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No samples matched these parameters.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = shown.map(s => {
+    const hard = s.flags.filter(f => f !== 'BELOW_MASK');
+    const cls = hard.length ? 'violation' : (s.visible ? '' : 'below');
+    const flags = s.flags.map(f => `<span class="flag flag-${f}">${f}</span>`).join('');
+    return `<tr class="${cls}"><td>${s.time.replace('T', ' ').replace('+00:00', '')}</td>` +
+      `<td>${fmt(s.azimuth_deg)}</td><td>${fmt(s.elevation_deg)}</td>` +
+      `<td>${fmt(s.commanded_az_deg)}</td><td>${fmt(s.commanded_el_deg)}</td>` +
+      `<td>${fmt(s.az_rate_dps, 3)}</td><td>${fmt(s.el_rate_dps, 3)}</td>` +
+      `<td>${fmt(s.range_km, 1)}</td><td style="text-align:left">${flags}</td></tr>`;
+  }).join('');
+}
+
+function renderPasses(passes) {
+  const box = $('pass-list');
+  if (!passes.length) {
+    box.innerHTML = '<div class="empty">No passes above the elevation mask in this window.</div>';
+    return;
+  }
+  box.innerHTML = passes.map((p, i) => {
+    const t = (x) => x ? x.time.replace('T', ' ').replace('+00:00', '') : '—';
+    const mins = p.duration_seconds ? (p.duration_seconds / 60).toFixed(1) : '—';
+    return `<div class="pass">
+      <div class="when">Pass ${i + 1} · ${t(p.rise)} UTC · ${mins} min</div>
+      <div class="detail">AOS az ${fmt(p.rise?.azimuth_deg, 1)}° · TCA ${t(p.culminate)} el ${fmt(p.culminate?.elevation_deg, 1)}° az ${fmt(p.culminate?.azimuth_deg, 1)}° · LOS ${t(p.set)} az ${fmt(p.set?.azimuth_deg, 1)}°</div>
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- canvas plots ---------------- */
+
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round((canvas.dataset.aspect ? rect.width * Number(canvas.dataset.aspect) : rect.height) * dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: canvas.height / dpr };
+}
+
+function drawSky(samples, mask) {
+  const canvas = $('sky');
+  // Hidden tabs report zero width; the tab switch redraws once it is visible.
+  if (!canvas.clientWidth) return;
+  canvas.style.height = canvas.clientWidth + 'px';
+  const { ctx, w, h } = setupCanvas(canvas);
+  const cx = w / 2, cy = h / 2, R = Math.max(10, Math.min(w, h) / 2 - 24);
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = '#24344a';
+  ctx.fillStyle = '#8397b0';
+  ctx.font = '11px system-ui';
+  ctx.textAlign = 'center';
+
+  for (let el = 0; el <= 90; el += 30) {
+    const r = R * (1 - el / 90);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    if (el < 90) ctx.fillText(el + '°', cx + 2, cy - r + 12);
+  }
+  for (let az = 0; az < 360; az += 30) {
+    const a = (az - 90) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + R * Math.cos(a), cy + R * Math.sin(a));
+    ctx.stroke();
+  }
+  // elevation mask ring
+  if (mask > 0 && mask < 90) {
+    const r = R * (1 - mask / 90);
+    ctx.strokeStyle = 'rgba(255,180,84,.7)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.fillStyle = '#dbe6f3';
+  ['N', 'E', 'S', 'W'].forEach((lbl, i) => {
+    const a = (i * 90 - 90) * Math.PI / 180;
+    ctx.fillText(lbl, cx + (R + 14) * Math.cos(a), cy + (R + 14) * Math.sin(a) + 4);
+  });
+
+  const pos = (s) => {
+    const r = R * (1 - Math.max(0, Math.min(90, s.elevation_deg)) / 90);
+    const a = (s.azimuth_deg - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  };
+
+  // below-horizon samples are drawn faintly at the rim so the track stays readable
+  let prev = null, prevVisible = null;
+  ctx.lineWidth = 2;
+  for (const s of samples) {
+    if (s.elevation_deg < 0) { prev = null; continue; }
+    const p = pos(s);
+    if (prev) {
+      ctx.strokeStyle = (s.visible && prevVisible) ? '#35e0c3' : 'rgba(131,151,176,.45)';
+      ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(p[0], p[1]); ctx.stroke();
+    }
+    prev = p; prevVisible = s.visible;
+  }
+
+  const visible = samples.filter(s => s.visible);
+  if (visible.length) {
+    const peak = visible.reduce((a, b) => (b.elevation_deg > a.elevation_deg ? b : a));
+    const [px, py] = pos(peak);
+    ctx.fillStyle = '#6ee787';
+    ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawTimeline(samples, acu) {
+  const canvas = $('timeline');
+  if (!canvas.clientWidth) return;
+  canvas.style.height = Math.max(280, Math.round(canvas.clientWidth * 0.45)) + 'px';
+  const { ctx, w, h } = setupCanvas(canvas);
+  const L = 46, Rp = 46, T = 14, B = 26;
+  const pw = w - L - Rp, ph = h - T - B;
+
+  ctx.clearRect(0, 0, w, h);
+  if (!samples.length) return;
+
+  const azMin = Math.min(...samples.map(s => s.commanded_az_deg));
+  const azMax = Math.max(...samples.map(s => s.commanded_az_deg));
+  const azLo = Math.floor(azMin / 30) * 30, azHi = Math.ceil(azMax / 30) * 30 || 30;
+  const xOf = (i) => L + pw * (i / Math.max(1, samples.length - 1));
+  const yAz = (v) => T + ph * (1 - (v - azLo) / Math.max(1e-6, azHi - azLo));
+  const yEl = (v) => T + ph * (1 - (v + 90) / 180);
+
+  ctx.strokeStyle = '#24344a';
+  ctx.fillStyle = '#8397b0';
+  ctx.font = '10px system-ui';
+  ctx.lineWidth = 1;
+  for (let f = 0; f <= 4; f++) {
+    const y = T + ph * f / 4;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.textAlign = 'right';
+    ctx.fillText((azHi - (azHi - azLo) * f / 4).toFixed(0) + '°', L - 5, y + 3);
+    ctx.textAlign = 'left';
+    ctx.fillText((90 - 180 * f / 4).toFixed(0) + '°', L + pw + 5, y + 3);
+  }
+  // horizon and mask reference lines on the elevation axis
+  ctx.strokeStyle = 'rgba(255,180,84,.5)';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(L, yEl(acu.min_elevation_deg)); ctx.lineTo(L + pw, yEl(acu.min_elevation_deg));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw each series in runs of constant visibility: below the mask the antenna
+  // is parked rather than following the target, so the two must not be joined
+  // into one continuous line.
+  const series = (key, y, color, dimColor) => {
+    let i = 0;
+    while (i < samples.length) {
+      const visible = samples[i].visible;
+      let j = i;
+      while (j < samples.length && samples[j].visible === visible) j++;
+      ctx.strokeStyle = visible ? color : dimColor;
+      ctx.lineWidth = visible ? 1.8 : 1;
+      ctx.beginPath();
+      for (let k = i; k < j; k++) {
+        const px = xOf(k), py = y(samples[k][key]);
+        // Lift the pen across a 360° wrap so it does not draw a vertical streak.
+        const wrapped = k > i && Math.abs(samples[k][key] - samples[k - 1][key]) > 180;
+        if (k === i || wrapped) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      i = j;
+    }
+  };
+  series('commanded_az_deg', yAz, '#35e0c3', 'rgba(53,224,195,.25)');
+  series('commanded_el_deg', yEl, '#6ee787', 'rgba(110,231,135,.25)');
+
+  ctx.fillStyle = '#8397b0';
+  ctx.textAlign = 'left';
+  ctx.fillText(samples[0].time.slice(11, 16), L, h - 8);
+  ctx.textAlign = 'right';
+  ctx.fillText(samples[samples.length - 1].time.slice(11, 16), L + pw, h - 8);
+  ctx.textAlign = 'center';
+  ctx.fillText('commanded azimuth (cyan) / elevation (green)', L + pw / 2, h - 8);
+}
+
+/* ---------------- live world map ---------------- */
+/* Equirectangular (plate carrée) projection: longitude and latitude map straight
+   onto x and y, which keeps every conversion here to one line and matches the
+   coastline rings in world.js. */
+
+const DEG = Math.PI / 180;
+const EARTH_RADIUS_KM = 6371.0;
+
+function subsolarPoint(date) {
+  // Low-precision solar position (NOAA/Astronomical Almanac); well under a degree,
+  // which is far finer than a terminator drawn on a 1000-pixel-wide map.
+  const n = date.getTime() / 86400000 + 2440587.5 - 2451545.0;   // days from J2000
+  const meanLon = (280.460 + 0.9856474 * n) * DEG;
+  const meanAnom = (357.528 + 0.9856003 * n) * DEG;
+  const ecliptic = meanLon + (1.915 * Math.sin(meanAnom) + 0.020 * Math.sin(2 * meanAnom)) * DEG;
+  const obliquity = 23.439 * DEG;
+  const dec = Math.asin(Math.sin(obliquity) * Math.sin(ecliptic));
+  const ra = Math.atan2(Math.cos(obliquity) * Math.sin(ecliptic), Math.cos(ecliptic));
+  const gmstDeg = ((18.697374558 + 24.06570982441908 * n) % 24) * 15;
+  return { lat: dec / DEG, lon: wrapLon(ra / DEG - gmstDeg) };
+}
+
+const wrapLon = (lon) => ((lon % 360) + 540) % 360 - 180;
+
+function greatCirclePoint(latDeg, lonDeg, bearingRad, arcRad) {
+  const lat = latDeg * DEG, lon = lonDeg * DEG;
+  const lat2 = Math.asin(Math.sin(lat) * Math.cos(arcRad) + Math.cos(lat) * Math.sin(arcRad) * Math.cos(bearingRad));
+  const lon2 = lon + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(arcRad) * Math.cos(lat),
+    Math.cos(arcRad) - Math.sin(lat) * Math.sin(lat2),
+  );
+  return [lat2 / DEG, wrapLon(lon2 / DEG)];
+}
+
+/** Circle on the ground inside which the satellite sits above `maskDeg`. */
+function footprint(latDeg, lonDeg, altitudeKm, maskDeg) {
+  const mask = Math.max(0, maskDeg) * DEG;
+  const ratio = EARTH_RADIUS_KM / (EARTH_RADIUS_KM + Math.max(0, altitudeKm)) * Math.cos(mask);
+  const arc = Math.acos(Math.min(1, ratio)) - mask;
+  if (!(arc > 0)) return [];   // mask so high nothing on the ground qualifies
+  const points = [];
+  for (let bearing = 0; bearing <= 360; bearing += 3) {
+    points.push(greatCirclePoint(latDeg, lonDeg, bearing * DEG, arc));
+  }
+  return points;
+}
+
+/** Great-circle arc between two ground points, as [lat, lon] samples. */
+function arcBetween(a, b, steps = 48) {
+  const [lat1, lon1] = [a[0] * DEG, a[1] * DEG], [lat2, lon2] = [b[0] * DEG, b[1] * DEG];
+  const v1 = [Math.cos(lat1) * Math.cos(lon1), Math.cos(lat1) * Math.sin(lon1), Math.sin(lat1)];
+  const v2 = [Math.cos(lat2) * Math.cos(lon2), Math.cos(lat2) * Math.sin(lon2), Math.sin(lat2)];
+  const dot = Math.max(-1, Math.min(1, v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]));
+  const omega = Math.acos(dot);
+  if (omega < 1e-9) return [a, b];
+  const out = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const s1 = Math.sin((1 - f) * omega) / Math.sin(omega), s2 = Math.sin(f * omega) / Math.sin(omega);
+    const v = [0, 1, 2].map(k => s1 * v1[k] + s2 * v2[k]);
+    out.push([Math.atan2(v[2], Math.hypot(v[0], v[1])) / DEG, Math.atan2(v[1], v[0]) / DEG]);
+  }
+  return out;
+}
+
+function drawMap() {
+  const canvas = $('map');
+  if (!canvas.clientWidth) return;   // hidden tab; redrawn when it becomes visible
+  canvas.style.height = Math.round(canvas.clientWidth / 2) + 'px';
+  const { ctx, w, h } = setupCanvas(canvas);
+  const xy = (lat, lon) => [(lon + 180) / 360 * w, (90 - lat) / 180 * h];
+
+  // A path over [lat, lon] samples, lifting the pen at nulls and at the
+  // antimeridian so nothing is drawn straight across the map.
+  const path = (points) => {
+    ctx.beginPath();
+    let prevLon = null;
+    for (const p of points) {
+      if (!p) { prevLon = null; continue; }
+      const [x, y] = xy(p[0], p[1]);
+      if (prevLon === null || Math.abs(p[1] - prevLon) > 180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      prevLon = p[1];
+    }
+    ctx.stroke();
+  };
+
+  ctx.fillStyle = '#0a1420';
+  ctx.fillRect(0, 0, w, h);
+
+  // land
+  ctx.fillStyle = '#17293b';
+  ctx.strokeStyle = '#2c4a68';
+  ctx.lineWidth = 0.6;
+  for (const ring of (typeof WORLD_LAND === 'undefined' ? [] : WORLD_LAND)) {
+    ctx.beginPath();
+    for (let i = 0; i < ring.length; i += 2) {
+      const [x, y] = xy(ring[i + 1], ring[i]);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // graticule + equator
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(36,52,74,.8)';
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const [x] = xy(0, lon);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const [, y] = xy(lat, 0);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  // night side: the terminator is the latitude where the sun sits on the horizon
+  const when = lastLive ? new Date(lastLive.sample.time) : new Date();
+  const sun = subsolarPoint(when);
+  const dec = (Math.abs(sun.lat) < 0.05 ? Math.sign(sun.lat || 1) * 0.05 : sun.lat) * DEG;
+  ctx.beginPath();
+  for (let lon = -180; lon <= 180; lon += 2) {
+    const hourAngle = (lon - sun.lon) * DEG;
+    const lat = Math.atan(-Math.cos(hourAngle) / Math.tan(dec)) / DEG;
+    const [x, y] = xy(lat, lon);
+    if (lon === -180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  const darkEdge = dec > 0 ? h : 0;   // sun north of the equator ⇒ south pole in darkness
+  ctx.lineTo(w, darkEdge); ctx.lineTo(0, darkEdge);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(3,7,14,.5)';
+  ctx.fill();
+
+  if (!lastLive) {
+    ctx.fillStyle = '#8397b0';
+    ctx.font = '13px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press Live to plot the satellite position', w / 2, h / 2);
+    return;
+  }
+
+  const s = lastLive.sample;
+  const station = lastLive.station || {};
+  const sat = [s.sub_lat_deg, s.sub_lon_deg];
+  const track = lastLive.ground_track;
+
+  // ground track: the part already flown, then the part still to come
+  if (track && track.points) {
+    const i = track.now_index;
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = '#1d7f70';
+    path(track.points.slice(0, i + 1));
+    ctx.strokeStyle = '#35e0c3';
+    path(track.points.slice(i));
+  }
+
+  // footprint of the current position
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(255,180,84,.85)';
+  ctx.setLineDash([5, 4]);
+  path(footprint(sat[0], sat[1], s.altitude_km, lastLive.acu.min_elevation_deg));
+  ctx.setLineDash([]);
+
+  // line of sight from the station, drawn only while the satellite is up
+  if (station.lat !== undefined && s.elevation_deg > 0) {
+    ctx.strokeStyle = s.visible ? 'rgba(110,231,135,.8)' : 'rgba(131,151,176,.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    path(arcBetween([station.lat, station.lon], sat));
+    ctx.setLineDash([]);
+  }
+
+  // station marker
+  if (station.lat !== undefined) {
+    const [sx, sy] = xy(station.lat, station.lon);
+    ctx.fillStyle = '#6ee787';
+    ctx.fillRect(sx - 3, sy - 3, 6, 6);
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillText(station.name || 'Station', sx + 7, sy + 4);
+  }
+
+  // satellite marker
+  const [px, py] = xy(sat[0], sat[1]);
+  ctx.strokeStyle = 'rgba(53,224,195,.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#35e0c3';
+  ctx.beginPath(); ctx.arc(px, py, 4.5, 0, Math.PI * 2); ctx.fill();
+  ctx.font = '12px system-ui';
+  ctx.textAlign = px > w - 140 ? 'right' : 'left';
+  ctx.fillText(lastLive.satellite.name || 'Satellite', px + (px > w - 140 ? -13 : 13), py - 8);
+
+  // position banner
+  const ns = sat[0] >= 0 ? 'N' : 'S', ew = sat[1] >= 0 ? 'E' : 'W';
+  const banner = `${Math.abs(sat[0]).toFixed(2)}°${ns}  ${Math.abs(sat[1]).toFixed(2)}°${ew}  ·  ` +
+    `${fmt(s.altitude_km, 0)} km  ·  ${s.time.replace('T', ' ').replace('+00:00', '')} UTC`;
+  ctx.font = '12px ui-monospace, Consolas, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(11,15,20,.72)';
+  ctx.fillRect(8, 8, ctx.measureText(banner).width + 16, 22);
+  ctx.fillStyle = '#dbe6f3';
+  ctx.fillText(banner, 16, 23);
+}
+
+/* ---------------- actions ---------------- */
+
+async function generate(event) {
+  event?.preventDefault();
+  const btn = $('generate');
+  btn.disabled = true; btn.textContent = 'Computing…';
+  showMsg($('track-msg'), '');
+  try {
+    const params = collect();
+    const result = await api('/api/track', params);
+    lastResult = result;
+    renderSummary(result);
+    renderTable(result.samples);
+    renderPasses(result.passes);
+    drawSky(result.samples, result.acu.min_elevation_deg);
+    drawTimeline(result.samples, result.acu);
+    if (!result.samples.length) {
+      showMsg($('track-msg'), 'No samples returned — check the time window or the "only above mask" option.', 'info');
+    }
+  } catch (err) {
+    showMsg($('track-msg'), err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate Az/El';
+  }
+}
+
+async function loadGpFiles(preferred) {
+  const select = $('gp-file');
+  try {
+    const data = await api('/api/gp-files');
+    const options = [];
+    for (const f of data.files) {
+      for (const sat of f.satellites) {
+        options.push({
+          value: `${f.file}|${sat.index}`,
+          label: `${sat.name} — ${f.file}${sat.epoch ? ' @ ' + sat.epoch.slice(0, 16) : ''}`,
         });
+      }
+    }
+    select.innerHTML = options.length
+      ? options.map(o => `<option value="${o.value}">${o.label}</option>`).join('')
+      : '<option value="">no element files in data/</option>';
+    if (preferred) {
+      const match = options.find(o => o.value.startsWith(preferred + '|'));
+      if (match) select.value = match.value;
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">${err.message}</option>`;
+  }
+}
 
-        const line1Ctrl = gui.add(myConfig, 'line1').name('TLE Line 1').disable().onFinishChange(v => updateRealTimeOrbit(v, myConfig.line2));
-        const line2Ctrl = gui.add(myConfig, 'line2').name('TLE Line 2').disable().onFinishChange(v => updateRealTimeOrbit(myConfig.line1, v));
-        gui.add(myConfig, 'fetchPass').name('📊 計算過境時間面板');
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-        // 預設啟動
-        updateRealTimeOrbit(myConfig.line1, myConfig.line2);
-        world.pointOfView({ lat: 25.0330, lng: 121.5654, altitude: 2.5 }, 2000);
-    </script>
+function toCsv(samples) {
+  const cols = ['time', 'azimuth_deg', 'elevation_deg', 'commanded_az_deg', 'commanded_el_deg',
+    'az_rate_dps', 'el_rate_dps', 'range_km', 'visible', 'flags'];
+  const rows = samples.map(s => cols.map(c => (c === 'flags' ? s.flags.join(' ') : s[c])).join(','));
+  return [cols.join(','), ...rows].join('\n');
+}
+
+function stamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
+
+/* ---------------- live tracking ---------------- */
+
+async function livePoll() {
+  try {
+    const params = collect();
+    const data = await api('/api/live', params);
+    const s = data.sample;
+    lastLive = { ...data, acu: params.acu };
+    drawMap();
+    $('lv-az').textContent = fmt(s.azimuth_deg) + '°';
+    $('lv-el').textContent = fmt(s.elevation_deg) + '°';
+    $('lv-caz').textContent = fmt(s.commanded_az_deg) + '°';
+    $('lv-cel').textContent = fmt(s.commanded_el_deg) + '°';
+    $('lv-rng').textContent = fmt(s.range_km, 0) + ' km';
+    $('lv-slat').textContent = fmt(s.sub_lat_deg, 3) + '°';
+    $('lv-slon').textContent = fmt(s.sub_lon_deg, 3) + '°';
+    $('lv-alt').textContent = fmt(s.altitude_km, 0) + ' km';
+    const hard = s.flags.filter(f => f !== 'BELOW_MASK');
+    $('lv-state').textContent = hard.length ? hard[0] : (s.visible ? 'TRACKING' : 'BELOW MASK');
+    $('lv-state').style.color = hard.length ? 'var(--bad)' : (s.visible ? 'var(--ok)' : 'var(--muted)');
+    $('lv-time').textContent = `${data.satellite.name} · ${s.time.replace('T', ' ')} UTC`;
+    showMsg($('live-msg'), '');
+  } catch (err) {
+    showMsg($('live-msg'), err.message);
+    stopLive();
+  }
+}
+
+function stopLive() {
+  clearInterval(liveTimer);
+  liveTimer = null;
+  $('live-toggle').textContent = 'Live';
+  $('live-toggle').classList.remove('primary');
+}
+
+function toggleLive() {
+  if (liveTimer) { stopLive(); return; }
+  $('live-toggle').textContent = 'Stop';
+  $('live-toggle').classList.add('primary');
+  document.querySelector('.tabs button[data-tab="live"]').click();
+  livePoll();
+  liveTimer = setInterval(livePoll, 1000);
+}
+
+/* ---------------- wiring ---------------- */
+
+function syncModeVisibility() {
+  const mode = $('sat-mode').value;
+  document.querySelectorAll('[data-mode]').forEach(el => { el.hidden = el.dataset.mode !== mode; });
+}
+
+$('sat-mode').addEventListener('change', syncModeVisibility);
+$('params').addEventListener('submit', generate);
+$('live-toggle').addEventListener('click', toggleLive);
+$('reload-files').addEventListener('click', () => loadGpFiles($('gp-file').value.split('|')[0]));
+
+$('fetch-tle').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  try {
+    const data = await api('/api/fetch-tle', { norad_id: Number($('norad-id').value) });
+    await loadGpFiles(data.file);
+    showMsg($('track-msg'), `Saved ${data.satellite.name} to data/${data.file} (epoch ${data.satellite.epoch})`, 'info');
+  } catch (err) {
+    showMsg($('track-msg'), err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Fetch & save to data/';
+  }
+});
+
+$('dl-csv').addEventListener('click', () => {
+  if (!lastResult) return;
+  download(`azel-${stamp()}.csv`, toCsv(lastResult.samples), 'text/csv');
+});
+$('dl-json').addEventListener('click', () => {
+  if (!lastResult) return;
+  download(`azel-${stamp()}.json`, JSON.stringify(lastResult, null, 2), 'application/json');
+});
+
+$('save-preset').addEventListener('click', () => {
+  localStorage.setItem(PRESET_KEY, JSON.stringify(collect()));
+  showMsg($('track-msg'), 'Parameters saved in this browser.', 'info');
+});
+$('reset-preset').addEventListener('click', () => {
+  localStorage.removeItem(PRESET_KEY);
+  location.reload();
+});
+
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-body').forEach(b => b.classList.toggle('active', b.id === 'tab-' + btn.dataset.tab));
+    if (btn.dataset.tab === 'track' && lastResult) {
+      drawSky(lastResult.samples, lastResult.acu.min_elevation_deg);
+      drawTimeline(lastResult.samples, lastResult.acu);
+    }
+    if (btn.dataset.tab === 'live') {
+      drawMap();
+      // Opening the tab shows the current position straight away; the Live button
+      // is only needed to keep it updating.
+      if (!liveTimer && !lastLive) livePoll();
+    }
+  });
+});
+
+window.addEventListener('resize', () => {
+  drawMap();
+  if (!lastResult) return;
+  drawSky(lastResult.samples, lastResult.acu.min_elevation_deg);
+  drawTimeline(lastResult.samples, lastResult.acu);
+});
+
+(async function init() {
+  let preferred;
+  try {
+    preferred = applyPreset(JSON.parse(localStorage.getItem(PRESET_KEY)));
+  } catch { /* ignore malformed preset */ }
+  syncModeVisibility();
+  await loadGpFiles(preferred);
+  try {
+    const h = await api('/api/health');
+    $('server-status').textContent = `server OK · ${h.time} UTC`;
+    $('server-status').style.color = 'var(--ok)';
+  } catch {
+    $('server-status').textContent = 'server unreachable — start src/app.py';
+    $('server-status').style.color = 'var(--bad)';
+  }
+})();
+</script>
 </body>
 </html>

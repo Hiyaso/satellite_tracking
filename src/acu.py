@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,155 @@ from skyfield.api import EarthSatellite, load, wgs84
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
+def build_satellite(
+    line1: Optional[str] = None,
+    line2: Optional[str] = None,
+    omm_fields: Optional[dict[str, object]] = None,
+    name: str = "satellite",
+    ts=None,
+) -> EarthSatellite:
+    """Build a Skyfield satellite from either a TLE pair or a GP (OMM) element set."""
+    if ts is None:
+        ts = load.timescale()
+    if omm_fields is not None:
+        satellite = EarthSatellite.from_omm(ts, omm_fields)
+    elif line1 and line2:
+        satellite = EarthSatellite(line1, line2, name, ts)
+    else:
+        raise ValueError("Provide either omm_fields or both line1 and line2")
+
+    # Skyfield does not always keep the timescale on the satellite, but the
+    # sampling helpers below need one to build time arrays.
+    satellite.ts = ts
+    return satellite
+
+
+def _as_utc(when: Optional[datetime]) -> datetime:
+    if when is None:
+        return datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        return when.replace(tzinfo=timezone.utc)
+    return when
+
+
+def calculate_az_el_series(
+    satellite: EarthSatellite,
+    latitude_deg: float,
+    longitude_deg: float,
+    elevation_m: float = 0.0,
+    start: Optional[datetime] = None,
+    step_seconds: float = 60.0,
+    count: int = 1440,
+) -> list[dict[str, object]]:
+    """Sample azimuth/elevation/range for `count` steps of `step_seconds` from `start`.
+
+    This is the shared engine behind the 24-hour sweeps and the web API; it returns
+    one dict per sample with the observation time, look angles, and slant range.
+    """
+    ts = getattr(satellite, "ts", None) or load.timescale()
+    start = _as_utc(start)
+    count = max(1, int(count))
+
+    times = [start + timedelta(seconds=step_seconds * i) for i in range(count)]
+    t = ts.from_datetimes(times)
+
+    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
+    topocentric = (satellite - station).at(t)
+    alt, az, distance = topocentric.altaz()
+
+    return [
+        {
+            "time": times[i],
+            "azimuth_deg": float(az.degrees[i]),
+            "elevation_deg": float(alt.degrees[i]),
+            "range_km": float(distance.km[i]),
+        }
+        for i in range(count)
+    ]
+
+
+def orbital_period_minutes(satellite: EarthSatellite) -> float:
+    """Orbital period in minutes, from the mean motion in the element set."""
+    no_kozai = float(satellite.model.no_kozai)  # radians per minute
+    if no_kozai <= 0:
+        raise ValueError("Element set has a non-positive mean motion")
+    return 2.0 * math.pi / no_kozai
+
+
+def calculate_ground_track(
+    satellite: EarthSatellite,
+    start: Optional[datetime] = None,
+    step_seconds: float = 60.0,
+    count: int = 121,
+) -> list[dict[str, object]]:
+    """Sample the sub-satellite point (the spot on Earth directly below the satellite).
+
+    Unlike `calculate_az_el_series` this does not depend on a ground station: it is
+    the satellite's own geodetic latitude/longitude/altitude, which is what a world
+    map plots.
+    """
+    ts = getattr(satellite, "ts", None) or load.timescale()
+    start = _as_utc(start)
+    count = max(1, int(count))
+
+    times = [start + timedelta(seconds=step_seconds * i) for i in range(count)]
+    subpoint = wgs84.subpoint(satellite.at(ts.from_datetimes(times)))
+
+    return [
+        {
+            "time": times[i],
+            "lat_deg": float(subpoint.latitude.degrees[i]),
+            "lon_deg": float(subpoint.longitude.degrees[i]),
+            "altitude_km": float(subpoint.elevation.km[i]),
+        }
+        for i in range(count)
+    ]
+
+
+def find_passes(
+    satellite: EarthSatellite,
+    latitude_deg: float,
+    longitude_deg: float,
+    elevation_m: float = 0.0,
+    start: Optional[datetime] = None,
+    duration_hours: float = 24.0,
+    min_elevation_deg: float = 10.0,
+) -> list[dict[str, object]]:
+    """Find rise / culminate / set events above `min_elevation_deg` in a time window."""
+    ts = getattr(satellite, "ts", None) or load.timescale()
+    start = _as_utc(start)
+    end = start + timedelta(hours=duration_hours)
+
+    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
+    times, events = satellite.find_events(
+        station, ts.from_datetime(start), ts.from_datetime(end), altitude_degrees=min_elevation_deg
+    )
+
+    difference = satellite - station
+    passes: list[dict[str, object]] = []
+    current: dict[str, object] = {}
+
+    for ti, event in zip(times, events):
+        alt, az, distance = difference.at(ti).altaz()
+        stamp = {
+            "time": ti.utc_datetime(),
+            "azimuth_deg": float(az.degrees),
+            "elevation_deg": float(alt.degrees),
+            "range_km": float(distance.km),
+        }
+        if event == 0:
+            current = {"rise": stamp}
+        elif event == 1:
+            current["culminate"] = stamp
+        elif event == 2:
+            current["set"] = stamp
+            if "rise" in current:
+                passes.append(current)
+            current = {}
+
+    return passes
+
+
 def calculate_az_el_from_tle(
     line1: str,
     line2: str,
@@ -23,22 +173,14 @@ def calculate_az_el_from_tle(
     when: Optional[datetime] = None,
 ) -> dict[str, float]:
     """Calculate azimuth/elevation for a satellite from a TLE and a ground station."""
-    ts = load.timescale()
-    satellite = EarthSatellite(line1, line2, "satellite", ts)
-
-    if when is None:
-        when = datetime.now(timezone.utc)
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-
-    t = ts.from_datetime(when)
-    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
-
-    alt, az, _ = (satellite - station).at(t).altaz()
+    satellite = build_satellite(line1, line2)
+    sample = calculate_az_el_series(
+        satellite, latitude_deg, longitude_deg, elevation_m, when, 1.0, 1
+    )[0]
 
     return {
-        "azimuth_deg": float(az.degrees),
-        "elevation_deg": float(alt.degrees),
+        "azimuth_deg": sample["azimuth_deg"],
+        "elevation_deg": sample["elevation_deg"],
     }
 
 
@@ -52,28 +194,35 @@ def calculate_az_el_over_day(
     step_seconds: float = 60.0,
 ) -> list[dict[str, object]]:
     """Calculate azimuth/elevation for a satellite at regular steps across 24 hours from `start`."""
-    ts = load.timescale()
-    satellite = EarthSatellite(line1, line2, "satellite", ts)
+    return _day_sweep(
+        build_satellite(line1, line2),
+        latitude_deg,
+        longitude_deg,
+        elevation_m,
+        start,
+        step_seconds,
+    )
 
-    if start is None:
-        start = datetime.now(timezone.utc)
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
 
+def _day_sweep(
+    satellite: EarthSatellite,
+    latitude_deg: float,
+    longitude_deg: float,
+    elevation_m: float,
+    start: Optional[datetime],
+    step_seconds: float,
+) -> list[dict[str, object]]:
     num_steps = max(1, int(timedelta(days=1) / timedelta(seconds=step_seconds)))
-    times = [start + timedelta(seconds=step_seconds * i) for i in range(num_steps)]
-    t = ts.from_datetimes(times)
-
-    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
-    alt, az, _ = (satellite - station).at(t).altaz()
-
+    rows = calculate_az_el_series(
+        satellite, latitude_deg, longitude_deg, elevation_m, start, step_seconds, num_steps
+    )
     return [
         {
-            "time": times[i],
-            "azimuth_deg": float(az.degrees[i]),
-            "elevation_deg": float(alt.degrees[i]),
+            "time": row["time"],
+            "azimuth_deg": row["azimuth_deg"],
+            "elevation_deg": row["elevation_deg"],
         }
-        for i in range(num_steps)
+        for row in rows
     ]
 
 
@@ -110,22 +259,14 @@ def calculate_az_el_from_gp(
     when: Optional[datetime] = None,
 ) -> dict[str, float]:
     """Calculate azimuth/elevation from a GP (General Perturbations / OMM) element set."""
-    ts = load.timescale()
-    satellite = EarthSatellite.from_omm(ts, omm_fields)
-
-    if when is None:
-        when = datetime.now(timezone.utc)
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-
-    t = ts.from_datetime(when)
-    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
-
-    alt, az, _ = (satellite - station).at(t).altaz()
+    satellite = build_satellite(omm_fields=omm_fields)
+    sample = calculate_az_el_series(
+        satellite, latitude_deg, longitude_deg, elevation_m, when, 1.0, 1
+    )[0]
 
     return {
-        "azimuth_deg": float(az.degrees),
-        "elevation_deg": float(alt.degrees),
+        "azimuth_deg": sample["azimuth_deg"],
+        "elevation_deg": sample["elevation_deg"],
     }
 
 
@@ -138,29 +279,14 @@ def calculate_az_el_from_gp_over_day(
     step_seconds: float = 60.0,
 ) -> list[dict[str, object]]:
     """Calculate az/el from a GP element set at regular steps across 24 hours from `start`."""
-    ts = load.timescale()
-    satellite = EarthSatellite.from_omm(ts, omm_fields)
-
-    if start is None:
-        start = datetime.now(timezone.utc)
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-
-    num_steps = max(1, int(timedelta(days=1) / timedelta(seconds=step_seconds)))
-    times = [start + timedelta(seconds=step_seconds * i) for i in range(num_steps)]
-    t = ts.from_datetimes(times)
-
-    station = wgs84.latlon(latitude_deg, longitude_deg, elevation_m)
-    alt, az, _ = (satellite - station).at(t).altaz()
-
-    return [
-        {
-            "time": times[i],
-            "azimuth_deg": float(az.degrees[i]),
-            "elevation_deg": float(alt.degrees[i]),
-        }
-        for i in range(num_steps)
-    ]
+    return _day_sweep(
+        build_satellite(omm_fields=omm_fields),
+        latitude_deg,
+        longitude_deg,
+        elevation_m,
+        start,
+        step_seconds,
+    )
 
 
 def _parse_when(value: Optional[str]) -> Optional[datetime]:
