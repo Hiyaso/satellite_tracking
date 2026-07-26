@@ -261,6 +261,11 @@ class DifiEncoder:
         `payload` must already be big-endian interleaved I/Q at `bit_depth`, and
         must be a whole number of 32-bit words.
         """
+        if not payload:
+            # A payload-less data packet is structurally decodable but carries no
+            # samples, which the standard does not allow; refuse it here rather
+            # than emit something a conforming receiver has to reject.
+            raise ValueError("a Signal Data packet must carry at least one sample")
         if len(payload) % 4:
             raise ValueError(f"payload must be a whole number of 32-bit words (got {len(payload)} bytes)")
         size_words = PROLOGUE_WORDS + len(payload) // 4
@@ -628,6 +633,10 @@ def main() -> None:
         parser.error("--sample-rate must be positive")
     if not 0.0 <= args.amplitude <= 1.0:
         parser.error("--amplitude must be between 0 and 1")
+    if args.samples_per_packet is not None and args.samples_per_packet <= 0:
+        parser.error("--samples-per-packet must be positive")
+    if args.duration < 0:
+        parser.error("--duration must not be negative")
 
     sys.exit(transmit(args))
 
