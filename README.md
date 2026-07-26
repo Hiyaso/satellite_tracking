@@ -11,6 +11,8 @@ from the command line, or as a Python library.
 | **`src/acu.py`** | Az/el engine, and a command-line calculator for a single instant or a 24-hour sweep, with optional JSON export |
 | **`src/acu_rt.py`** | Real-time az/el tracker; prints the live position until stopped |
 | **`src/fetch_tle.py`** | Downloads the latest GP (OMM) element set from CelesTrak into `data/` |
+| **`src/difi_tx.py`** | DIFI / VITA 49.2 transmitter — streams a synthetic digitised IF flow over UDP |
+| **`src/difi_rx.py`** | DIFI / VITA 49.2 receiver — decodes that flow and checks it against the standard |
 
 ## Quick start
 
@@ -41,6 +43,7 @@ All commands below are run from the `satellite_tracking/` project root.
 ```
 satellite_tracking/
 ├── src/                    # index.html, world.js, app.py, acu.py, acu_rt.py, fetch_tle.py
+│                           # difi_tx.py, difi_rx.py
 ├── data/                   # element sets from fetch_tle.py, JSON exports from acu.py --output
 └── config/
     └── requirements.txt    # Python dependencies
@@ -414,3 +417,126 @@ unchanged and are now thin wrappers over `calculate_az_el_series`.
 Note that the pedestal model (offsets, travel limits, slew-rate flags, cable wrap)
 lives in `app.py`, not `acu.py`: `acu.py` returns true look angles, and `app.py`
 turns them into commanded axis angles.
+
+## `src/difi_tx.py` / `src/difi_rx.py` — DIFI / VITA 49.2 digitised IF
+
+Two standalone applications that carry a digitised RF/IF stream over UDP using
+the **DIFI 1.x** packet set (IEEE-ISTO Std 4900-2021), the ground-segment profile
+of **VITA 49.2 (VRT)**. `difi_tx.py` synthesises and transmits a flow; `difi_rx.py`
+receives it, decodes every field, and validates it against the standard.
+
+Both are pure standard library — nothing to add to `config/requirements.txt`.
+
+```bash
+# terminal 1 — receive and validate
+python src/difi_rx.py --bind 0.0.0.0:4991 --measure-signal
+
+# terminal 2 — transmit a 1 MSPS 16-bit tone for 10 seconds
+python src/difi_tx.py --dest 127.0.0.1:4991 --duration 10
+```
+
+### The three packet types
+
+DIFI constrains VITA 49.2 to exactly three packets, all big-endian, all with a
+shared 7-word prologue (header, stream ID, two Class ID words, and a 32-bit
+integer plus 64-bit picosecond timestamp):
+
+| Packet | Type | Info / Packet class | Size | Carries |
+|---|---|---|---|---|
+| Standard Flow Signal Data | `0x1` | `0x0000` / `0x0000` | 7 + N words | Interleaved complex IQ samples |
+| Standard Flow Signal Context | `0x4` | `0x0000` / `0x0001` | 27 words | RF/IF frequency, sample rate, bandwidth, gain, reference level, sample format |
+| Version Flow Signal Context | `0x5` | `0x0001` / `0x0004` | 11 words | VITA 49 spec revision and DIFI ICD version |
+
+Every Class ID carries the DIFI OUI `0x6A621E`. TSF is fixed at `0x2` (real time,
+picoseconds); TSI selects the epoch and must not be zero. The transmitter
+interleaves context and version packets into the data stream on their own timers,
+and each packet type keeps an independent modulo-16 sequence counter as the
+standard requires.
+
+### Transmitter
+
+```bash
+python src/difi_tx.py --dest 127.0.0.1:4991 \
+    --sample-rate 1e6 --rf-freq 1.95e9 --bit-depth 16 \
+    --signal tone --tone-freq 250e3 --amplitude 0.5 --duration 10
+```
+
+| Option | Purpose |
+|---|---|
+| `--dest host:port` | Where to send (default `127.0.0.1:4991`) |
+| `--stream-id` | 32-bit stream ID, accepts `0x` hex |
+| `--sample-rate`, `--rf-freq`, `--if-freq`, `--bandwidth` | Flow parameters advertised in the context packet; bandwidth defaults to 80% of the sample rate |
+| `--bit-depth {8,16}` | Bits per I and per Q component |
+| `--signal {tone,sweep,noise,zero}` | Synthetic payload; `--tone-freq` and `--amplitude` shape it |
+| `--samples-per-packet` | Defaults to filling a 1500-byte MTU without fragmenting (360 samples at 16-bit) |
+| `--context-interval`, `--version-interval` | Seconds between context / version packets |
+| `--gain`, `--reference-level`, `--calibrated-time`, `--reference-lock` | Values reported in the context packet |
+| `--burst` | Send flat out instead of pacing to the sample rate |
+| `--tsi {utc,gps,posix}` | Integer timestamp epoch |
+
+Timestamps advance from one wall-clock anchor by exact sample counts, so they stay
+sample-accurate rather than inheriting scheduler jitter, and pacing targets the
+stream clock so jitter cannot accumulate into drift.
+
+### Receiver
+
+```bash
+python src/difi_rx.py --bind 0.0.0.0:4991 --measure-signal --duration 30
+```
+
+| Option | Purpose |
+|---|---|
+| `--bind host:port` | Address to listen on (default `0.0.0.0:4991`) |
+| `--stream-id` | Only accept one stream ID; everything else is counted and dropped |
+| `--measure-signal` | Decode IQ payloads to report RMS and peak in dBFS (costs CPU at high rates) |
+| `--verbose` / `--quiet` | Print every packet / suppress context and version dumps |
+| `--duration`, `--max-errors`, `--report-interval`, `--recv-buffer` | Run length, error print cap, progress cadence, socket buffer |
+
+It tracks each stream ID separately and reports, per packet type, the count,
+how many conformed, sequence gaps with an estimate of packets lost, timestamp
+regressions, throughput, and the decoded contents of the most recent context
+packet. Sample bit depth is taken from that context packet, so the receiver
+adapts to the flow without being told.
+
+Exit status makes it usable as a conformance check in a script:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every packet conformed |
+| `1` | No DIFI packets received |
+| `2` | One or more spec violations |
+
+Validation covers the packet type, Class ID present bit, reserved bits, TSM, TSI,
+TSF, OUI, information and packet class codes, declared size against the real
+datagram length, fractional timestamps below one second, CIF0/CIF1, reference
+point, the full data payload format (packing method, real/complex type, item
+format, tag sizes, item sizes), and frequency sanity — plus sequence continuity
+and timestamp monotonicity across packets.
+
+### Conformance
+
+Given the same flow parameters, the encoder reproduces the DIFI Consortium's
+published reference context packet **byte for byte** — all 27 words, including the
+header, both Class ID words, `CIF0 = 0xFBB98000`, the 2<sup>-20</sup> fixed-point
+frequency scaling, 2<sup>-7</sup> gain scaling, the State and Event Indicators
+word, and the payload format word `0xA00001C7` for 8-bit samples (`0xA00003CF` at
+16-bit).
+
+The receiver's checks were verified against deliberately corrupted packets —
+wrong OUI, wrong class codes, bad CIF0, wrong reference point, `TSF` set to sample
+count, `TSI = 0`, size-field mismatch, reserved bits set, `TSM` wrong for the
+packet type, out-of-range fractional timestamps, processing-efficient packing,
+bad version CIF1, out-of-range RF frequency, truncated and non-word-aligned
+datagrams — each of which is reported with the specific field and expected value.
+
+### Notes and limits
+
+- Sustained throughput is bounded by Python: roughly 30–60 Mb/s on one core, which
+  covers 1 MSPS at 16-bit comfortably. For line-rate work the packet framing here
+  ports directly onto the UDP source/sink already in the neighbouring `SISO2` C++
+  project.
+- The transmitter synthesises IQ locally; it is not wired to a radio. Signals are
+  generated once into a cyclic buffer and sliced per packet, so the tone frequency
+  is snapped to the nearest bin that wraps cleanly, keeping it phase continuous.
+- DIFI 1.2's command packets (flow control, packet classes `0x0005`/`0x0006`) are
+  not implemented — only the three packets of the 1.0/1.1 data plane.
