@@ -11,6 +11,7 @@ from the command line, or as a Python library.
 | **`src/acu.py`** | Az/el engine, and a command-line calculator for a single instant or a 24-hour sweep, with optional JSON export |
 | **`src/acu_rt.py`** | Real-time az/el tracker; prints the live position until stopped |
 | **`src/fetch_tle.py`** | Downloads the latest GP (OMM) element set from CelesTrak into `data/` |
+| **`src/tle_renew.py`** | Keeps those element sets fresh on a schedule, twice a day by default, while the console runs |
 | **`src/difi_tx.py`** | DIFI / VITA 49.2 transmitter — streams a synthetic digitised IF flow over UDP |
 | **`src/difi_rx.py`** | DIFI / VITA 49.2 receiver — decodes that flow and checks it against the standard |
 
@@ -63,8 +64,9 @@ satellite_tracking/
   | `flask-cors==6.0.5` | `src/app.py` | CORS support, for calling the API from a page served elsewhere |
 
 Network access is only needed to pull element sets: `fetch_tle.py`, the console's
-*Fetch* button, and the `norad` satellite mode. Everything else — propagation, the
-plots, the live map — runs offline.
+*Fetch* and *Renew now* buttons, the `norad` satellite mode, and the automatic
+renewal described below. Everything else — propagation, the plots, the live map —
+runs offline. `tle_renew.py` needs nothing beyond the standard library.
 
 ## Web console — set ACU parameters in a browser, get az/el out
 
@@ -89,6 +91,13 @@ server, no build step, and no CDN — the page works offline.
 | Time window | Start (UTC, tracks the UTC clock until edited), duration in minutes, step in seconds |
 | Pedestal | Elevation mask, az/el offsets (bias), azimuth travel limits (cable wrap), elevation limits, max az/el slew rates |
 
+**Start** is UTC, and shows it. A `datetime-local` input carries no timezone, so
+an empty one would have the browser offer your PC's local clock — misleading next
+to a field labelled UTC. It is seeded with the UTC wall clock instead and keeps
+ticking until you type in it; while untouched the request is still sent with a
+blank start, so the window begins at the *server's* clock rather than the
+browser's. Clearing the field hands it back to the clock.
+
 Under the duration and step, the panel counts the **data points** the run will
 produce — `floor(duration × 60 / step) + 1`, the same arithmetic the server uses
 — so the size of a run is visible before you ask for it. It also shows how much
@@ -106,7 +115,7 @@ cap. The limit itself is `MAX_SAMPLES` in `src/app.py`, served to the page via
 
 ### What you get back
 
-- **Track** — summary tiles (samples, time above mask, max elevation, min range, peak axis rates, limit hits), a sky plot of the pass with the mask ring, and a commanded az/el timeline. Segments where the antenna is not tracking are drawn faintly.
+- **Track** — summary tiles (samples, time above mask, max elevation, min range, peak axis rates, limit hits), a sky plot of the pass with the mask ring, and a commanded az/el timeline. Arrowheads along the sky track show the direction of travel, so a pass that doubles back in azimuth is not ambiguous. Segments where the antenna is not tracking are drawn faintly.
 - **Data** — the full sample table: time, true az/el, commanded az/el, axis rates, slant range, and per-sample flags. Download as CSV or JSON.
 - **Passes** — AOS / TCA / LOS with times, azimuths, peak elevation, and duration. Click a pass to narrow every other view to it (see [Choosing a pass](#choosing-a-pass)).
 - **Live** — a world map, plus tiles for true az/el, commanded az/el, slant range, ACU state, sub-satellite latitude/longitude and altitude, polled once per second.
@@ -142,6 +151,7 @@ Opening the **Live** tab plots the satellite's position straight away; press
 
 - the sub-satellite point (the spot on Earth directly below the satellite) with its name, latitude, longitude, altitude, and timestamp;
 - the ground track — half an orbit behind in dim teal, then the next **three orbits ahead**, each fainter than the last so it is clear which crossing comes first;
+- arrowheads along that track, and one just clear of the satellite marker, showing which way it is flying;
 - the footprint circle: inside it the satellite is above your elevation mask;
 - your ground station, and a dashed great-circle line to the satellite while it is above the horizon (green once it is above the mask);
 - day/night shading, so you can tell whether the pass is in sunlight.
