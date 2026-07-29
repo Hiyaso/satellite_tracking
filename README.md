@@ -43,10 +43,11 @@ All commands below are run from the `satellite_tracking/` project root.
 ```
 satellite_tracking/
 ├── src/                    # index.html, world.js, app.py, acu.py, acu_rt.py, fetch_tle.py
-│                           # difi_tx.py, difi_rx.py
+│                           # tle_renew.py, difi_tx.py, difi_rx.py
 ├── data/                   # element sets from fetch_tle.py, JSON exports from acu.py --output
 └── config/
-    └── requirements.txt    # Python dependencies
+    ├── requirements.txt    # Python dependencies
+    └── tle_renew.json      # automatic renewal schedule (created on first run)
 ```
 
 ## Requirements
@@ -85,18 +86,54 @@ server, no build step, and no CDN — the page works offline.
 |---|---|
 | Satellite | GP/OMM file already in `data/`, a manually pasted TLE, or a NORAD ID fetched live from CelesTrak |
 | Ground station | Name, latitude, longitude, elevation (m) |
-| Time window | Start (UTC, blank = now), duration in minutes, step in seconds |
+| Time window | Start (UTC, tracks the UTC clock until edited), duration in minutes, step in seconds |
 | Pedestal | Elevation mask, az/el offsets (bias), azimuth travel limits (cable wrap), elevation limits, max az/el slew rates |
+
+Under the duration and step, the panel counts the **data points** the run will
+produce — `floor(duration × 60 / step) + 1`, the same arithmetic the server uses
+— so the size of a run is visible before you ask for it. It also shows how much
+of the 50000-point limit that is. Go over and the box turns red, says by how
+much, and names a step that fits:
+
+```
+8,641 data points · limit 50,000 · 17% of it
+50,005 data points · limit 50,000 — over by 5; use a step of 10.1 s or more
+```
+
+The suggested step is always rounded up, so applying it genuinely lands under the
+cap. The limit itself is `MAX_SAMPLES` in `src/app.py`, served to the page via
+`/api/health`.
 
 ### What you get back
 
 - **Track** — summary tiles (samples, time above mask, max elevation, min range, peak axis rates, limit hits), a sky plot of the pass with the mask ring, and a commanded az/el timeline. Segments where the antenna is not tracking are drawn faintly.
 - **Data** — the full sample table: time, true az/el, commanded az/el, axis rates, slant range, and per-sample flags. Download as CSV or JSON.
-- **Passes** — AOS / TCA / LOS with times, azimuths, peak elevation, and duration.
+- **Passes** — AOS / TCA / LOS with times, azimuths, peak elevation, and duration. Click a pass to narrow every other view to it (see [Choosing a pass](#choosing-a-pass)).
 - **Live** — a world map, plus tiles for true az/el, commanded az/el, slant range, ACU state, sub-satellite latitude/longitude and altitude, polled once per second.
 
 `Save preset` keeps the current parameters in the browser's local storage so they
 come back on the next visit.
+
+### Choosing a pass
+
+A generated window usually holds several passes. Clicking one in the **Passes**
+tab narrows the rest of the console to it:
+
+- the sky plot and the timeline redraw over just that pass;
+- the data table shows only its rows;
+- the summary tiles are recomputed for it — max elevation, min range and peak
+  axis rates then describe that pass rather than the whole window;
+- **Download CSV / JSON** export only that pass, named `azel-pass2-<timestamp>`.
+  The JSON keeps the full structure, with `passes` narrowed to the chosen one.
+
+A bar above the summary tiles says which pass is showing, with **Show all** to
+clear it; clicking the chosen pass again does the same. This filters the samples
+already generated — no second request — so switching between passes is instant
+and always agrees with the data on screen. Generating again clears the choice,
+since pass 2 of the old window is not pass 2 of the new one.
+
+If a pass is shorter than your sample step, nothing was sampled inside it and the
+console says so; reduce **Step (s)** and generate again.
 
 ### Live map
 
@@ -104,7 +141,7 @@ Opening the **Live** tab plots the satellite's position straight away; press
 **Live** to keep it updating once per second. The map shows:
 
 - the sub-satellite point (the spot on Earth directly below the satellite) with its name, latitude, longitude, altitude, and timestamp;
-- the ground track — half an orbit behind in dim teal, a full orbit ahead in bright teal;
+- the ground track — half an orbit behind in dim teal, then the next **three orbits ahead**, each fainter than the last so it is clear which crossing comes first;
 - the footprint circle: inside it the satellite is above your elevation mask;
 - your ground station, and a dashed great-circle line to the satellite while it is above the horizon (green once it is above the mask);
 - day/night shading, so you can tell whether the pass is in sunlight.
@@ -144,6 +181,9 @@ passes the plain 0-360° bearing is shown unless the travel range forbids it.
 | `GET /api/health` | — | Server time |
 | `GET /api/gp-files` | — | GP/OMM element files found in `data/` |
 | `POST /api/fetch-tle` | `{ "norad_id" }` | Fetches from CelesTrak, saves to `data/`, returns the element summary |
+| `GET /api/tle-renew` | — | Automatic renewal schedule and per-satellite status |
+| `POST /api/tle-renew` | `{ "enabled", "interval_hours", "satellites" }` (all optional) | Updates the schedule, persists it, returns the new status |
+| `POST /api/tle-renew/run` | `{ "norad_id" }` (optional) | Renews now, off-schedule; without an ID, every scheduled satellite |
 | `POST /api/track` | `{ "satellite", "station", "window", "acu", "visible_only" }` | Samples, summary, and passes |
 | `POST /api/live` | same as `/api/track` (window uses `when`) | One instantaneous sample (including the sub-satellite point and altitude) plus the ground track around that instant |
 | `POST /api/az-el` | `{ "line1", "line2", "lat", "lon", "elevation_m", "when" }` | Azimuth/elevation at that instant (kept from the original API) |
@@ -190,12 +230,57 @@ needs:
 }
 ```
 
-`ground_track` spans half an orbit before the sample and one orbit after it, and is
-`null` if the element set cannot be propagated over that span.
+`ground_track` spans half an orbit before the sample and three orbits after it —
+281 points at 80 per revolution — and is `null` if the element set cannot be
+propagated over that span. Change the span with `TRACK_PAST_REVS` /
+`TRACK_FUTURE_REVS` in `src/app.py`; the point count follows from them, so the
+track keeps its resolution rather than stretching the same points further. Split
+the future part into revolutions with `period_minutes × 60 / step_seconds`, which
+is how the console shades each orbit differently.
 
 Bad input comes back as HTTP 400 with `{"status": "error", "message": ...}`. A
-request is capped at 20000 samples; shorten the duration or increase the step if
-you hit it.
+request is capped at 50000 samples; shorten the duration or increase the step if
+you hit it. `GET /api/health` reports the live figures under `limits`
+(`max_samples`, `min_step_seconds`), so a client can size a run without
+hard-coding them.
+
+### Automatic element-set renewal
+
+Element sets go stale — CelesTrak republishes GP data a few times a day, and SGP4
+accuracy falls off either side of the epoch. The console renews the files in
+`data/` on a schedule, twice a day by default, from a background thread started
+with the server. The *Automatic renewal* box in the parameter panel turns it on
+or off, sets the rate, and lists each satellite with its epoch, last renewal, and
+time until the next one; *Renew now* fetches immediately.
+
+The schedule lives in `config/tle_renew.json`, seeded on first run from the
+`gp_*.json` files already in `data/`:
+
+```jsonc
+{
+  "enabled": true,
+  "interval_hours": 12,                                   // twice a day
+  "satellites": [{"norad_id": 25544, "file": "gp_25544.json"}]
+}
+```
+
+Notes on how it behaves:
+
+- The **file's modification time is the record** of the last renewal — there is no
+  separate state file to drift out of step with what is on disk. A satellite whose
+  file is older than the interval is renewed as soon as the server starts, so
+  downtime does not leave you on stale elements.
+- A failed fetch **leaves the existing file untouched** and retries in 15 minutes
+  rather than on every pass of the loop, so an outage at CelesTrak cannot cost you
+  the elements you already have. The error shows against that satellite in the UI.
+- Files are replaced atomically, so a track request that loads an element set
+  mid-renewal reads either the old set or the new one, never a truncated file.
+- `interval_hours` is floored at 0.5 h so a typo cannot hammer CelesTrak.
+
+Renewal only runs while the console server is up. To keep elements fresh when it
+is not, use the OS-level schedule under
+[Keeping it fresh automatically](#keeping-it-fresh-automatically) instead — the two
+are independent, so pick one rather than running both against the same file.
 
 ## `src/acu.py` — command-line az/el calculator
 
@@ -345,7 +430,12 @@ python src/acu_rt.py --gp-file data/gp_25544.json
 
 ### Keeping it fresh automatically
 
-CelesTrak updates most GP data every few hours, so refreshing twice a day keeps propagation error low without hammering the API. On Windows, schedule it with Task Scheduler:
+CelesTrak updates most GP data every few hours, so refreshing twice a day keeps propagation error low without hammering the API.
+
+If you run the web console, it already does this for you — see
+[Automatic element-set renewal](#automatic-element-set-renewal). Use an OS-level
+schedule instead when the elements must stay fresh with the console shut down.
+On Windows, schedule it with Task Scheduler:
 
 ```powershell
 $venvPython  = "C:\path\to\satellite_tracking\.venv\Scripts\python.exe"

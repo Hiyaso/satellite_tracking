@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "interval_hours": 12.0,
+  "satellites": [
+    {
+      "norad_id": 25544,
+      "file": "gp_25544.json"
+    },
+    {
+      "norad_id": 66666,
+      "file": "gp_66666.json"
+    }
+  ]
+}

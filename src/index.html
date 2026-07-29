@@ -110,6 +110,7 @@
     border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; pointer-events: none;
   }
   .map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .map-legend i.arrow { border-radius: 0; clip-path: polygon(0 0, 100% 50%, 0 100%); }
 
   .pass-list { display: grid; gap: 8px; }
   .pass {
@@ -118,12 +119,54 @@
   }
   .pass .when { color: var(--accent); font-weight: 600; }
   .pass .detail { color: var(--muted); }
+  .pass { cursor: pointer; transition: background .15s, border-color .15s; }
+  .pass:hover { background: #1f2d40; }
+  .pass:focus-visible { outline: 1px solid var(--accent-dim); }
+  .pass.selected { border-color: var(--accent); border-left-width: 5px; background: #16303a; }
+  .pass .pick { font-size: 11px; margin-top: 3px; color: #6d829c; }
+  .pass.selected .pick { color: var(--accent); }
+
+  .filter-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+    padding: 6px 10px; font-size: 12px; border-radius: 5px;
+    background: #16303a; border: 1px solid #245362; color: #b3e6f2;
+  }
+  .filter-bar button { width: auto; margin-left: auto; }
+
+  .points {
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin: -4px 0 10px;
+    padding: 5px 8px; border-radius: 5px; font-size: 11px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .points b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .points.over { border-color: #6b2b2b; background: #3a1a1a; color: #ffc9c9; }
+  .points.over b { color: #ffc9c9; }
+
+  .renew-list { display: grid; gap: 6px; margin-bottom: 8px; }
+  .renew-sat {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px;
+  }
+  .renew-sat .id { grid-column: 1; grid-row: 1; font-size: 12px; }
+  .renew-sat .when { grid-column: 1; grid-row: 2; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .renew-sat .when.err { color: var(--bad); }
+  /* Explicit placement: with only a row pinned, auto-placement drops the button
+     into the first column and the label text collapses to a sliver. */
+  .renew-sat .drop {
+    grid-column: 2; grid-row: 1 / span 2; justify-self: end; align-self: center;
+    width: auto; padding: 1px 7px; font-size: 13px; line-height: 1.3; color: var(--muted);
+  }
+  .renew-sat .drop:hover { color: var(--bad); }
+  .renew-list .empty { padding: 8px; font-size: 11px; }
 
   .msg { padding: 8px 10px; border-radius: 5px; font-size: 12px; margin-bottom: 10px; display: none; }
   .msg.error { display: block; background: #3a1a1a; border: 1px solid #6b2b2b; color: #ffc9c9; }
   .msg.info { display: block; background: #16303a; border: 1px solid #245362; color: #b3e6f2; }
   .empty { color: var(--muted); padding: 24px; text-align: center; }
   .hint { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+  /* The negative top margin tucks a hint under an input; under a row of buttons
+     it reads as part of them, so give it room to breathe instead. */
+  .btn-row + .hint { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -178,6 +221,28 @@
       </fieldset>
 
       <fieldset>
+        <legend>Automatic renewal</legend>
+        <label style="color:var(--text)">
+          <input type="checkbox" id="renew-enabled">Keep element sets fresh
+        </label>
+        <label>
+          <span>Renewals per day</span>
+          <select id="renew-rate">
+            <option value="24">1 — daily</option>
+            <option value="12" selected>2 — twice a day</option>
+            <option value="6">4 — every 6 hours</option>
+            <option value="2">12 — every 2 hours</option>
+          </select>
+        </label>
+        <div id="renew-list" class="renew-list"></div>
+        <div class="btn-row">
+          <button type="button" class="btn-small" id="renew-now">Renew now</button>
+          <button type="button" class="btn-small" id="renew-add">Add this satellite</button>
+        </div>
+        <p class="hint" id="renew-note">Renewal runs while the console server is up.</p>
+      </fieldset>
+
+      <fieldset>
         <legend>Ground station</legend>
         <label><span>Name</span><input id="st-name" value="Taipei"></label>
         <div class="row">
@@ -190,13 +255,15 @@
       <fieldset>
         <legend>Time window</legend>
         <label>
-          <span>Start (UTC, blank = now)</span>
+          <span>Start (UTC)</span>
           <input id="w-start" type="datetime-local" step="1">
         </label>
+        <p class="hint">Shows UTC now — not your PC's local clock — and keeps ticking until you edit it. Clear the field to fall back to the server's clock.</p>
         <div class="row">
           <label><span>Duration (min)</span><input id="w-duration" type="number" step="any" value="180"></label>
           <label><span>Step (s)</span><input id="w-step" type="number" step="any" value="10"></label>
         </div>
+        <div class="points" id="points"></div>
         <label style="color:var(--text)">
           <input type="checkbox" id="visible-only">Only output samples above the mask
         </label>
@@ -245,11 +312,12 @@
 
     <div class="tab-body active" id="tab-track">
       <div class="msg" id="track-msg"></div>
+      <div class="filter-bar" id="filter-bar" hidden></div>
       <div class="stats" id="summary"></div>
       <div class="plots">
         <div>
           <canvas id="sky" width="640" height="640"></canvas>
-          <p class="hint">Sky view — north up, east right; rings every 30° elevation. Grey = below mask.</p>
+          <p class="hint">Sky view — north up, east right; rings every 30° elevation. Arrows show the direction of travel. Grey = below mask.</p>
         </div>
         <div>
           <canvas id="timeline" width="1200" height="640"></canvas>
@@ -284,8 +352,11 @@
       <div class="map-wrap">
         <canvas id="map" width="1200" height="600"></canvas>
         <div class="map-legend">
-          <span><i style="background:#35e0c3"></i>ground track ahead</span>
+          <span><i style="background:#35e0c3"></i>next orbit</span>
+          <span><i style="background:rgba(53,224,195,.5)"></i>orbit +2</span>
+          <span><i style="background:rgba(53,224,195,.28)"></i>orbit +3</span>
           <span><i style="background:#1d7f70"></i>track behind</span>
+          <span><i class="arrow" style="background:#35e0c3"></i>direction of travel</span>
           <span><i style="background:#ffb454"></i>footprint above mask</span>
           <span><i style="background:#6ee787"></i>station</span>
         </div>
@@ -315,6 +386,70 @@ const PRESET_KEY = 'acu-console-params';
 let lastResult = null;
 let lastLive = null;
 let liveTimer = null;
+// The start field mirrors UTC now until the operator types a time of their own.
+// While it is untouched the request still goes out with a blank start, so the
+// window begins at the server's clock rather than at whatever this PC reads.
+let startPristine = true;
+
+/* ---------------- UTC start field ---------------- */
+
+/* A datetime-local input carries no zone: the browser fills an empty one from
+   the PC's local clock (UTC+8 here), which is not what this field means. Seeding
+   it with the UTC wall clock makes the digits and the "UTC" label agree. */
+const utcFieldValue = (date) => date.toISOString().slice(0, 19);
+
+function tickStartField() {
+  const el = $('w-start');
+  if (startPristine && document.activeElement !== el) el.value = utcFieldValue(new Date());
+}
+
+/* ---------------- data point count ---------------- */
+
+/* The server derives the sample count from duration and step; showing the same
+   arithmetic beside the inputs means the size of a run is visible before it is
+   asked for, rather than arriving as an error afterwards. Limits come from
+   /api/health so this page holds no second copy of them. */
+let limits = { max_samples: 50000, min_step_seconds: 0.1 };
+
+/** Sample count for a window, matching the server: int(seconds / step) + 1. */
+function pointCount(durationMinutes, stepSeconds) {
+  if (!(durationMinutes > 0) || !(stepSeconds > 0)) return null;
+  return Math.floor(durationMinutes * 60 / stepSeconds) + 1;
+}
+
+function renderPointCount() {
+  const box = $('points');
+  const duration = Number($('w-duration').value), step = Number($('w-step').value);
+  const count = pointCount(duration, step);
+  const cap = limits.max_samples;
+
+  if (count === null) {
+    box.className = 'points';
+    box.innerHTML = '<span>Set a duration and step to size the run.</span>';
+    return;
+  }
+  // A step under the server's floor is rejected however few points it produces,
+  // so say that rather than quoting a count the run will never return.
+  if (step < limits.min_step_seconds) {
+    box.className = 'points over';
+    box.innerHTML = `<span>Step must be at least ${limits.min_step_seconds} s.</span>`;
+    return;
+  }
+  const over = count > cap;
+  // At the cap, the step that would just fit is more use than "too many".
+  // Rounded up, never down: a value rounded to the nearest tenth can still be
+  // fractionally too small, and advice you can follow and still be over is worse
+  // than none. 10.0008 s is shown as 10.1, which genuinely fits.
+  const places = (v) => (v < 1 ? 2 : 1);
+  const roundUp = (v) => (Math.ceil(v * 10 ** places(v)) / 10 ** places(v)).toFixed(places(v));
+  const fitStep = over ? roundUp(duration * 60 / (cap - 1)) : null;
+  box.className = 'points' + (over ? ' over' : '');
+  box.innerHTML = `<b>${count.toLocaleString()}</b> <span>data points` +
+    ` · limit ${cap.toLocaleString()}` +
+    (over ? ` — over by ${(count - cap).toLocaleString()}; use a step of ${fitStep} s or more`
+          : ` · ${Math.round(100 * count / cap)}% of it`) +
+    `</span>`;
+}
 
 /* ---------------- parameter collection ---------------- */
 
@@ -340,7 +475,7 @@ function collect() {
       elevation_m: Number($('st-elev').value),
     },
     window: {
-      start: $('w-start').value ? $('w-start').value + 'Z' : '',
+      start: (startPristine || !$('w-start').value) ? '' : $('w-start').value + 'Z',
       duration_minutes: Number($('w-duration').value),
       step_seconds: Number($('w-step').value),
     },
@@ -408,10 +543,96 @@ function showMsg(el, text, kind = 'error') {
   if (!text) el.className = 'msg';
 }
 
+/* ---------------- pass selection ---------------- */
+/* Choosing a pass narrows every view to that pass. It filters the samples
+   already in hand rather than asking the server again, so switching between
+   passes is instant and cannot disagree with the generated data. */
+
+let selectedPass = null;   // index into lastResult.passes, or null for all
+
+/** [from, to] in epoch ms. A pass clipped by the window edge has an open end. */
+function passWindow(pass) {
+  const at = (event) => (event ? Date.parse(event.time) : null);
+  return [at(pass.rise) ?? -Infinity, at(pass.set) ?? Infinity];
+}
+
+/** The samples every view should draw: the whole window, or one pass of it. */
+function activeSamples() {
+  if (!lastResult) return [];
+  if (selectedPass === null || !lastResult.passes[selectedPass]) return lastResult.samples;
+  const [from, to] = passWindow(lastResult.passes[selectedPass]);
+  return lastResult.samples.filter(s => {
+    const t = Date.parse(s.time);
+    return t >= from && t <= to;
+  });
+}
+
+/** Mirrors the server's _summarize so a selected pass gets its own statistics. */
+function summarise(samples) {
+  if (!samples.length) return { samples: 0, visible_samples: 0, violations: 0 };
+  const visible = samples.filter(s => s.visible);
+  const values = (key, from) => from.map(s => s[key]).filter(Number.isFinite);
+  const max = (key, from) => { const v = values(key, from); return v.length ? Math.max(...v) : null; };
+  const min = (key, from) => { const v = values(key, from); return v.length ? Math.min(...v) : null; };
+  // Rates are peaked over the tracked samples only, matching the server: while
+  // the antenna is parked below the mask its rates are not a slew of the target.
+  const tracked = visible.length ? visible : samples;
+  return {
+    samples: samples.length,
+    visible_samples: visible.length,
+    visible_percent: Math.round(1000 * visible.length / samples.length) / 10,
+    max_elevation_deg: max('elevation_deg', samples),
+    min_range_km: min('range_km', samples),
+    peak_az_rate_dps: max('az_rate_dps', tracked),
+    peak_el_rate_dps: max('el_rate_dps', tracked),
+    violations: samples.filter(s => s.flags.some(f => f !== 'BELOW_MASK')).length,
+  };
+}
+
+/** Redraw everything that depends on which pass is chosen. */
+function applyPassSelection() {
+  if (!lastResult) return;
+  const samples = activeSamples();
+  const bar = $('filter-bar');
+
+  if (selectedPass === null || !lastResult?.passes[selectedPass]) {
+    bar.hidden = true;
+    renderSummary(lastResult, lastResult.summary);
+  } else {
+    const p = lastResult.passes[selectedPass];
+    const span = `${utcStamp(p.rise?.time)} → ${(p.set?.time || '').slice(11, 19) || '—'} UTC`;
+    bar.hidden = false;
+    bar.innerHTML = `<span>Showing <b>pass ${selectedPass + 1}</b> of ${lastResult.passes.length} · ${span}` +
+      ` · ${samples.length} samples</span><button type="button" class="btn-small" id="show-all">Show all</button>`;
+    $('show-all').addEventListener('click', () => selectPass(null));
+    renderSummary(lastResult, summarise(samples));
+  }
+
+  renderTable(samples);
+  if (selectedPass !== null) $('table-note').textContent += ` · pass ${selectedPass + 1} only`;
+  drawSky(samples, lastResult.acu.min_elevation_deg);
+  drawTimeline(samples, lastResult.acu);
+  renderPasses(lastResult.passes);   // re-rendered so the cards show what is chosen
+
+  // A pass shorter than the sample step falls between samples, so say so rather
+  // than leaving the plots mysteriously blank.
+  if (selectedPass !== null && !samples.length) {
+    showMsg($('track-msg'), 'This pass is shorter than the sample step — nothing was sampled inside it. Reduce the step and generate again.', 'info');
+  } else {
+    showMsg($('track-msg'), '');
+  }
+}
+
+function selectPass(index) {
+  // Clicking the chosen pass again clears the filter, so the list is a toggle.
+  selectedPass = (index === selectedPass) ? null : index;
+  applyPassSelection();
+}
+
 /* ---------------- rendering ---------------- */
 
-function renderSummary(result) {
-  const s = result.summary, sat = result.satellite;
+function renderSummary(result, summary) {
+  const s = summary, sat = result.satellite;
   const cells = [
     ['Satellite', sat.name || '—'],
     ['Samples', s.samples ?? 0],
@@ -461,9 +682,15 @@ function renderPasses(passes) {
   box.innerHTML = passes.map((p, i) => {
     const t = (x) => x ? x.time.replace('T', ' ').replace('+00:00', '') : '—';
     const mins = p.duration_seconds ? (p.duration_seconds / 60).toFixed(1) : '—';
-    return `<div class="pass">
+    const count = lastResult ? lastResult.samples.filter(s => {
+      const [from, to] = passWindow(p), at = Date.parse(s.time);
+      return at >= from && at <= to;
+    }).length : 0;
+    return `<div class="pass${i === selectedPass ? ' selected' : ''}" data-pass="${i}" role="button" tabindex="0"
+      title="Show only this pass in the track, data and downloads">
       <div class="when">Pass ${i + 1} · ${t(p.rise)} UTC · ${mins} min</div>
       <div class="detail">AOS az ${fmt(p.rise?.azimuth_deg, 1)}° · TCA ${t(p.culminate)} el ${fmt(p.culminate?.elevation_deg, 1)}° az ${fmt(p.culminate?.azimuth_deg, 1)}° · LOS ${t(p.set)} az ${fmt(p.set?.azimuth_deg, 1)}°</div>
+      <div class="detail pick">${count} samples · ${i === selectedPass ? 'showing — click to clear' : 'click to show only this pass'}</div>
     </div>`;
   }).join('');
 }
@@ -478,6 +705,21 @@ function setupCanvas(canvas) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { ctx, w: rect.width, h: canvas.height / dpr };
+}
+
+/** Filled triangle at (x, y) pointing along `angle` in screen radians. */
+function arrowHead(ctx, x, y, angle, size = 7) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(size, 0);
+  ctx.lineTo(-size * 0.7, size * 0.6);
+  ctx.lineTo(-size * 0.3, 0);
+  ctx.lineTo(-size * 0.7, -size * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawSky(samples, mask) {
@@ -537,6 +779,23 @@ function drawSky(samples, mask) {
       ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(p[0], p[1]); ctx.stroke();
     }
     prev = p; prevVisible = s.visible;
+  }
+
+  // Arrowheads every ~70 px along the track, so the direction the satellite
+  // sweeps through the sky is unambiguous on a pass that doubles back.
+  let ap = null, run = 35;
+  for (const s of samples) {
+    if (s.elevation_deg < 0) { ap = null; continue; }
+    const p = pos(s);
+    if (ap) {
+      run += Math.hypot(p[0] - ap[0], p[1] - ap[1]);
+      if (run >= 70) {
+        ctx.fillStyle = s.visible ? '#35e0c3' : 'rgba(131,151,176,.55)';
+        arrowHead(ctx, p[0], p[1], Math.atan2(p[1] - ap[1], p[0] - ap[0]), 6);
+        run = 0;
+      }
+    }
+    ap = p;
   }
 
   const visible = samples.filter(s => s.visible);
@@ -706,6 +965,27 @@ function drawMap() {
     ctx.stroke();
   };
 
+  // Arrowheads spaced along a [lat, lon] path, pointing the way the satellite
+  // flies. Nulls and antimeridian jumps break the run exactly as they do in
+  // `path`, so no arrow lands on a seam the line itself does not draw.
+  const arrows = (points, spacing = 120) => {
+    let prev = null, prevLon = null, run = spacing / 2;
+    for (const p of points) {
+      if (!p) { prev = null; prevLon = null; continue; }
+      const [x, y] = xy(p[0], p[1]);
+      if (prev && Math.abs(p[1] - prevLon) <= 180) {
+        run += Math.hypot(x - prev[0], y - prev[1]);
+        if (run >= spacing) {
+          arrowHead(ctx, x, y, Math.atan2(y - prev[1], x - prev[0]));
+          run = 0;
+        }
+      } else {
+        run = spacing / 2;
+      }
+      prev = [x, y]; prevLon = p[1];
+    }
+  };
+
   ctx.fillStyle = '#0a1420';
   ctx.fillRect(0, 0, w, h);
 
@@ -766,14 +1046,31 @@ function drawMap() {
   const sat = [s.sub_lat_deg, s.sub_lon_deg];
   const track = lastLive.ground_track;
 
-  // ground track: the part already flown, then the part still to come
+  // Ground track: the part already flown, then each revolution still to come.
+  // Later orbits are drawn fainter so three overlapping sinusoids stay readable
+  // and it is obvious which crossing is the imminent one.
   if (track && track.points) {
     const i = track.now_index;
+    const flown = track.points.slice(0, i + 1);
     ctx.lineWidth = 1.6;
     ctx.strokeStyle = '#1d7f70';
-    path(track.points.slice(0, i + 1));
-    ctx.strokeStyle = '#35e0c3';
-    path(track.points.slice(i));
+    path(flown);
+    ctx.fillStyle = 'rgba(29,127,112,.95)';
+    arrows(flown);
+
+    const AHEAD = ['#35e0c3', 'rgba(53,224,195,.5)', 'rgba(53,224,195,.28)'];
+    const perRev = track.period_minutes * 60 / track.step_seconds;
+    for (let rev = 0; ; rev++) {
+      const from = i + Math.round(rev * perRev);
+      if (from >= track.points.length - 1) break;
+      // +1 so consecutive revolutions share a point and meet without a gap.
+      const leg = track.points.slice(from, i + Math.round((rev + 1) * perRev) + 1);
+      const shade = AHEAD[Math.min(rev, AHEAD.length - 1)];
+      ctx.strokeStyle = shade;
+      path(leg);
+      ctx.fillStyle = shade;
+      arrows(leg);
+    }
   }
 
   // footprint of the current position
@@ -809,6 +1106,18 @@ function drawMap() {
   ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2); ctx.stroke();
   ctx.fillStyle = '#35e0c3';
   ctx.beginPath(); ctx.arc(px, py, 4.5, 0, Math.PI * 2); ctx.fill();
+
+  // Heading arrow just clear of the marker, aimed at the next track sample, so
+  // the current direction of travel reads without following the whole track.
+  if (track && track.points) {
+    const a = track.points[track.now_index], b = track.points[track.now_index + 1];
+    if (a && b && Math.abs(b[1] - a[1]) <= 180) {
+      const [ax, ay] = xy(a[0], a[1]), [bx, by] = xy(b[0], b[1]);
+      const heading = Math.atan2(by - ay, bx - ax);
+      arrowHead(ctx, px + 16 * Math.cos(heading), py + 16 * Math.sin(heading), heading, 8);
+    }
+  }
+
   ctx.font = '12px system-ui';
   ctx.textAlign = px > w - 140 ? 'right' : 'left';
   ctx.fillText(lastLive.satellite.name || 'Satellite', px + (px > w - 140 ? -13 : 13), py - 8);
@@ -836,11 +1145,10 @@ async function generate(event) {
     const params = collect();
     const result = await api('/api/track', params);
     lastResult = result;
-    renderSummary(result);
-    renderTable(result.samples);
-    renderPasses(result.passes);
-    drawSky(result.samples, result.acu.min_elevation_deg);
-    drawTimeline(result.samples, result.acu);
+    // A fresh run invalidates the old choice: pass 2 of the previous window is
+    // not pass 2 of this one.
+    selectedPass = null;
+    applyPassSelection();
     if (!result.samples.length) {
       showMsg($('track-msg'), 'No samples returned — check the time window or the "only above mask" option.', 'info');
     }
@@ -893,6 +1201,77 @@ function toCsv(samples) {
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
+
+/* ---------------- automatic TLE renewal ---------------- */
+
+let renewStatus = null;
+
+/** "in 5h 12m" / "3h ago" — the schedule is easier to read as a distance. */
+function relativeTime(iso) {
+  if (!iso) return '—';
+  const delta = (new Date(iso) - Date.now()) / 1000;
+  const mag = Math.abs(delta);
+  const span = mag < 90 ? 'less than a minute'
+    : mag < 5400 ? `${Math.round(mag / 60)} min`
+    : mag < 172800 ? `${Math.floor(mag / 3600)}h ${Math.round(mag % 3600 / 60)}m`
+    : `${(mag / 86400).toFixed(1)} days`;
+  return delta >= 0 ? `in ${span}` : `${span} ago`;
+}
+
+const utcStamp = (iso) => iso ? iso.replace('T', ' ').replace('+00:00', '') : '—';
+
+function renderRenew(status) {
+  renewStatus = status;
+  $('renew-enabled').checked = status.enabled;
+  // Snap the selector to the stored interval; an interval set outside the UI
+  // (straight in config/tle_renew.json) still shows honestly as a custom entry.
+  const rate = $('renew-rate');
+  const hours = String(status.interval_hours);
+  if (![...rate.options].some(o => o.value === hours)) {
+    rate.add(new Option(`${(24 / status.interval_hours).toFixed(2).replace(/\.?0+$/, '')} — every ${status.interval_hours}h`, hours));
+  }
+  rate.value = hours;
+
+  $('renew-list').innerHTML = status.satellites.length
+    ? status.satellites.map(s => {
+        const when = s.error
+          ? `failed: ${s.error}`
+          : `last ${utcStamp(s.last_renewed)} · next ${relativeTime(s.next_renewal)}`;
+        return `<div class="renew-sat">
+          <div class="id">NORAD ${s.norad_id}<span class="hint" style="margin:0 0 0 6px">${s.epoch ? 'epoch ' + s.epoch.slice(0, 16) : 'no file yet'}</span></div>
+          <button type="button" class="drop" data-drop="${s.norad_id}" title="Stop renewing this satellite">&times;</button>
+          <div class="when${s.error ? ' err' : ''}">${when}</div>
+        </div>`;
+      }).join('')
+    : '<div class="empty">No satellites scheduled — use “Add this satellite”.</div>';
+
+  $('renew-note').textContent = status.enabled
+    ? `Renewal runs while the console server is up${status.running ? '' : ' (scheduler not started)'}.`
+    : 'Automatic renewal is off — element sets will go stale.';
+}
+
+async function loadRenew() {
+  try {
+    renderRenew(await api('/api/tle-renew'));
+  } catch (err) {
+    $('renew-list').innerHTML = `<div class="empty">${err.message}</div>`;
+  }
+}
+
+async function configureRenew(patch) {
+  try {
+    renderRenew(await api('/api/tle-renew', patch));
+  } catch (err) {
+    showMsg($('track-msg'), err.message);
+  }
+}
+
+/** The NORAD ID the parameter panel currently points at, whatever the source. */
+function selectedNoradId() {
+  if ($('sat-mode').value === 'norad') return Number($('norad-id').value);
+  const match = /gp_(\d+)\.json/.exec($('gp-file').value || '');
+  return match ? Number(match[1]) : null;
 }
 
 /* ---------------- live tracking ---------------- */
@@ -951,12 +1330,76 @@ $('params').addEventListener('submit', generate);
 $('live-toggle').addEventListener('click', toggleLive);
 $('reload-files').addEventListener('click', () => loadGpFiles($('gp-file').value.split('|')[0]));
 
+$('w-duration').addEventListener('input', renderPointCount);
+$('w-step').addEventListener('input', renderPointCount);
+
+// Choosing a pass in the list filters the track, table and downloads.
+$('pass-list').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-pass]');
+  if (card) selectPass(Number(card.dataset.pass));
+});
+$('pass-list').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const card = e.target.closest('[data-pass]');
+  if (!card) return;
+  e.preventDefault();               // Space would scroll the list
+  selectPass(Number(card.dataset.pass));
+});
+
+$('renew-enabled').addEventListener('change', (e) => configureRenew({ enabled: e.currentTarget.checked }));
+$('renew-rate').addEventListener('change', (e) => configureRenew({ interval_hours: Number(e.currentTarget.value) }));
+
+$('renew-add').addEventListener('click', () => {
+  const norad_id = selectedNoradId();
+  if (!norad_id) {
+    showMsg($('track-msg'), 'Pick a gp_<norad>.json file or the NORAD source to schedule a satellite.');
+    return;
+  }
+  const satellites = (renewStatus?.satellites || []).map(s => ({ norad_id: s.norad_id, file: s.file }));
+  if (satellites.some(s => s.norad_id === norad_id)) {
+    showMsg($('track-msg'), `NORAD ${norad_id} is already scheduled.`, 'info');
+    return;
+  }
+  configureRenew({ satellites: [...satellites, { norad_id, file: `gp_${norad_id}.json` }] });
+});
+
+$('renew-list').addEventListener('click', (e) => {
+  const drop = e.target.closest('[data-drop]');
+  if (!drop) return;
+  const norad_id = Number(drop.dataset.drop);
+  const satellites = (renewStatus?.satellites || [])
+    .filter(s => s.norad_id !== norad_id)
+    .map(s => ({ norad_id: s.norad_id, file: s.file }));
+  configureRenew({ satellites });
+});
+
+$('renew-now').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = 'Renewing…';
+  try {
+    renderRenew(await api('/api/tle-renew/run', {}));
+    await loadGpFiles($('gp-file').value.split('|')[0]);
+    showMsg($('track-msg'), 'Element sets renewed from CelesTrak.', 'info');
+  } catch (err) {
+    showMsg($('track-msg'), err.message);
+    loadRenew();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Renew now';
+  }
+});
+
+// An edit pins the window; emptying the field hands it back to the UTC clock.
+$('w-start').addEventListener('input', (e) => {
+  startPristine = !e.currentTarget.value;
+});
+
 $('fetch-tle').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true; btn.textContent = 'Fetching…';
   try {
     const data = await api('/api/fetch-tle', { norad_id: Number($('norad-id').value) });
     await loadGpFiles(data.file);
+    loadRenew();   // a manual fetch resets that satellite's renewal clock
     showMsg($('track-msg'), `Saved ${data.satellite.name} to data/${data.file} (epoch ${data.satellite.epoch})`, 'info');
   } catch (err) {
     showMsg($('track-msg'), err.message);
@@ -965,13 +1408,20 @@ $('fetch-tle').addEventListener('click', async (e) => {
   }
 });
 
+// Downloads follow the choice, so exporting a single pass needs no editing after
+// the fact; the filename says which pass it holds.
+const exportName = () => (selectedPass === null ? 'azel' : `azel-pass${selectedPass + 1}`) + `-${stamp()}`;
+
 $('dl-csv').addEventListener('click', () => {
   if (!lastResult) return;
-  download(`azel-${stamp()}.csv`, toCsv(lastResult.samples), 'text/csv');
+  download(`${exportName()}.csv`, toCsv(activeSamples()), 'text/csv');
 });
 $('dl-json').addEventListener('click', () => {
   if (!lastResult) return;
-  download(`azel-${stamp()}.json`, JSON.stringify(lastResult, null, 2), 'application/json');
+  const chosen = selectedPass === null ? lastResult.passes : [lastResult.passes[selectedPass]];
+  const samples = activeSamples();
+  const out = { ...lastResult, samples, passes: chosen, summary: selectedPass === null ? lastResult.summary : summarise(samples) };
+  download(`${exportName()}.json`, JSON.stringify(out, null, 2), 'application/json');
 });
 
 $('save-preset').addEventListener('click', () => {
@@ -988,8 +1438,8 @@ document.querySelectorAll('.tabs button').forEach(btn => {
     document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.tab-body').forEach(b => b.classList.toggle('active', b.id === 'tab-' + btn.dataset.tab));
     if (btn.dataset.tab === 'track' && lastResult) {
-      drawSky(lastResult.samples, lastResult.acu.min_elevation_deg);
-      drawTimeline(lastResult.samples, lastResult.acu);
+      drawSky(activeSamples(), lastResult.acu.min_elevation_deg);
+      drawTimeline(activeSamples(), lastResult.acu);
     }
     if (btn.dataset.tab === 'live') {
       drawMap();
@@ -1003,8 +1453,8 @@ document.querySelectorAll('.tabs button').forEach(btn => {
 window.addEventListener('resize', () => {
   drawMap();
   if (!lastResult) return;
-  drawSky(lastResult.samples, lastResult.acu.min_elevation_deg);
-  drawTimeline(lastResult.samples, lastResult.acu);
+  drawSky(activeSamples(), lastResult.acu.min_elevation_deg);
+  drawTimeline(activeSamples(), lastResult.acu);
 });
 
 (async function init() {
@@ -1013,11 +1463,17 @@ window.addEventListener('resize', () => {
     preferred = applyPreset(JSON.parse(localStorage.getItem(PRESET_KEY)));
   } catch { /* ignore malformed preset */ }
   syncModeVisibility();
+  tickStartField();
+  setInterval(tickStartField, 1000);
+  renderPointCount();               // drawn from the defaults before any server reply
   await loadGpFiles(preferred);
+  loadRenew();
+  setInterval(loadRenew, 60000);   // keeps the "next in …" countdown honest
   try {
     const h = await api('/api/health');
     $('server-status').textContent = `server OK · ${h.time} UTC`;
     $('server-status').style.color = 'var(--ok)';
+    if (h.limits) { limits = h.limits; renderPointCount(); }
   } catch {
     $('server-status').textContent = 'server unreachable — start src/app.py';
     $('server-status').style.color = 'var(--bad)';

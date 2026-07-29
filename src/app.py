@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,19 +32,31 @@ from acu import (  # noqa: E402  (path setup must happen first)
     orbital_period_minutes,
 )
 from fetch_tle import fetch_gp_by_norad_id  # noqa: E402
+from tle_renew import TleRenewer  # noqa: E402
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
 
+# Keeps the element files in data/ fresh on a schedule (twice a day by default).
+# Started from __main__ so the debug reloader's parent process does not run a
+# second copy of the thread.
+renewer = TleRenewer(DATA_DIR, fetch_gp_by_norad_id)
+
 # Guard rails so a mistyped step/duration in the UI cannot ask for a gigabyte of JSON.
-MAX_SAMPLES = 20000
+# The console shows this count as you set the window, and reports it back in
+# `limits` so the page never has to hard-code the number.
+MAX_SAMPLES = 50000
 MIN_STEP_SECONDS = 0.1
 
 # Ground track drawn on the live map: half a revolution of history so the recent
-# path is visible, one full revolution ahead, sampled at a fixed point count.
-TRACK_POINTS = 121
+# path is visible, three revolutions ahead so the next passes are all in view.
+# The point count follows from the span rather than being fixed, so changing the
+# number of revolutions keeps the same resolution instead of stretching the same
+# points over a longer track and going visibly jagged.
 TRACK_PAST_REVS = 0.5
-TRACK_FUTURE_REVS = 1.0
+TRACK_FUTURE_REVS = 3.0
+TRACK_POINTS_PER_REV = 80
+TRACK_POINTS = int(round((TRACK_PAST_REVS + TRACK_FUTURE_REVS) * TRACK_POINTS_PER_REV)) + 1
 
 # CelesTrak lookups are memoised because the live panel polls once a second while
 # element sets change a few times a day; the explicit "fetch & save" button stays
@@ -424,7 +437,15 @@ def world_outline():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "success", "time": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    return jsonify(
+        {
+            "status": "success",
+            "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            # So the console can count points against the real limits instead of
+            # keeping its own copy of them in step with this file.
+            "limits": {"max_samples": MAX_SAMPLES, "min_step_seconds": MIN_STEP_SECONDS},
+        }
+    )
 
 
 @app.route("/api/gp-files")
@@ -476,6 +497,36 @@ def fetch_tle():
             "satellite": _omm_meta(elements[0]) | {"name": elements[0].get("OBJECT_NAME")},
         }
     )
+
+
+@app.route("/api/tle-renew", methods=["GET", "POST"])
+def tle_renew():
+    """Read or update the automatic element-set renewal schedule."""
+    if request.method == "GET":
+        return jsonify({"status": "success"} | renewer.status())
+
+    body = request.get_json(silent=True) or {}
+    patch: dict[str, Any] = {}
+    if "enabled" in body:
+        patch["enabled"] = bool(body["enabled"])
+    if body.get("interval_hours") is not None:
+        patch["interval_hours"] = _number(body["interval_hours"], "renewal interval")
+    if body.get("satellites") is not None:
+        patch["satellites"] = body["satellites"]
+    return jsonify({"status": "success"} | renewer.configure(patch))
+
+
+@app.route("/api/tle-renew/run", methods=["POST"])
+def tle_renew_run():
+    """Renew now, off-schedule. Without a NORAD ID, every configured satellite."""
+    body = request.get_json(silent=True) or {}
+    norad_id = body.get("norad_id")
+    status = renewer.renew_now(int(norad_id) if norad_id is not None else None)
+    failed = [s for s in status["satellites"] if s["error"]]
+    if failed and len(failed) == len(status["satellites"]):
+        message = "; ".join(f"{s['norad_id']}: {s['error']}" for s in failed)
+        return jsonify({"status": "error", "message": f"CelesTrak fetch failed: {message}"} | status), 502
+    return jsonify({"status": "success"} | status)
 
 
 @app.route("/api/track", methods=["POST"])
@@ -628,6 +679,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
     parser.add_argument("--debug", action="store_true", help="Enable Flask auto-reload/debug")
     args = parser.parse_args()
+
+    # Under the debug reloader only the child process should renew, otherwise two
+    # threads fetch the same files.
+    if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        renewer.start()
+        status = renewer.status()
+        if status["enabled"] and status["satellites"]:
+            ids = ", ".join(str(s["norad_id"]) for s in status["satellites"])
+            print(f"TLE auto-renew: every {status['interval_hours']:g} h for {ids}")
 
     print(f"ACU console: http://{args.host}:{args.port}/")
     app.run(host=args.host, port=args.port, debug=args.debug)
