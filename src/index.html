@@ -1309,13 +1309,18 @@ function stopLive() {
   $('live-toggle').classList.remove('primary');
 }
 
-function toggleLive() {
-  if (liveTimer) { stopLive(); return; }
+function startLive() {
+  if (liveTimer) return;
   $('live-toggle').textContent = 'Stop';
   $('live-toggle').classList.add('primary');
-  document.querySelector('.tabs button[data-tab="live"]').click();
   livePoll();
   liveTimer = setInterval(livePoll, 1000);
+}
+
+function toggleLive() {
+  if (liveTimer) { stopLive(); return; }
+  document.querySelector('.tabs button[data-tab="live"]').click();
+  startLive();
 }
 
 /* ---------------- wiring ---------------- */
@@ -1474,6 +1479,7 @@ window.addEventListener('resize', () => {
     $('server-status').textContent = `server OK · ${h.time} UTC`;
     $('server-status').style.color = 'var(--ok)';
     if (h.limits) { limits = h.limits; renderPointCount(); }
+    startLive();
   } catch {
     $('server-status').textContent = 'server unreachable — start src/app.py';
     $('server-status').style.color = 'var(--bad)';
