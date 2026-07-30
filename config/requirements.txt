@@ -5,3 +5,7 @@ sgp4==2.27
 # Web API server (app.py)
 flask==3.1.3
 flask-cors==6.0.5
+
+# DIFI waterfall FFT (difi_monitor.py) — already pulled in transitively by
+# skyfield, listed explicitly since app.py now imports it directly
+numpy==2.5.1

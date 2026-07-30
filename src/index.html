@@ -101,6 +101,16 @@
   .live { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
   .live .stat .v { font-size: 26px; color: var(--accent); }
   .live .stat .v.small { font-size: 20px; }
+  .rf-params { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin-top: 6px; }
+  .rf-params .stat { padding: 6px 8px; }
+  .rf-params .stat .v.small { font-size: 15px; color: var(--text); }
+
+  .waterfall-wrap { margin-bottom: 12px; }
+  #difi-waterfall { background: #0a1420; image-rendering: pixelated; }
+  .waterfall-axis {
+    display: flex; justify-content: space-between; font-size: 10px; color: var(--muted);
+    font-variant-numeric: tabular-nums; margin-top: 3px;
+  }
 
   .map-wrap { position: relative; margin-bottom: 12px; }
   #map { background: #0a1420; }
@@ -308,6 +318,7 @@
       <button type="button" data-tab="table">Data</button>
       <button type="button" data-tab="passes">Passes</button>
       <button type="button" data-tab="live">Live</button>
+      <button type="button" data-tab="difi">DIFI</button>
     </div>
 
     <div class="tab-body active" id="tab-track">
@@ -373,6 +384,28 @@
         <div class="stat"><div class="k">Altitude</div><div class="v small" id="lv-alt">—</div></div>
       </div>
       <p class="hint" id="lv-time">Press <b>Live</b> to poll the current position and look angles once per second.</p>
+    </div>
+
+    <div class="tab-body" id="tab-difi">
+      <div class="msg" id="difi-msg"></div>
+      <div class="row">
+        <label><span>Bind host</span><input id="difi-host" type="text" value="0.0.0.0"></label>
+        <label><span>Bind port</span><input id="difi-port" type="number" step="1" value="4991"></label>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="difi-toggle">Start</button>
+      </div>
+      <div class="stats" id="difi-summary"></div>
+      <div class="waterfall-wrap" id="difi-waterfall-wrap" hidden>
+        <canvas id="difi-waterfall" width="512" height="220"></canvas>
+        <div class="waterfall-axis">
+          <span id="difi-wf-lo">−Fs/2</span>
+          <span id="difi-wf-mid">IF centre</span>
+          <span id="difi-wf-hi">+Fs/2</span>
+        </div>
+      </div>
+      <div class="renew-list" id="difi-streams"></div>
+      <p class="hint">Start the receiver, then point <code>difi_tx.py</code> (or any DIFI 1.x source) at this host:port. Stats and the waterfall update live while running.</p>
     </div>
   </section>
 </div>
@@ -1323,6 +1356,164 @@ function toggleLive() {
   startLive();
 }
 
+/* ---------------- DIFI receiver status ---------------- */
+
+let difiRunning = false;
+let difiTimer = null;
+
+function renderDifi(data) {
+  difiRunning = data.running;
+  $('difi-toggle').textContent = data.running ? 'Stop' : 'Start';
+  $('difi-toggle').classList.toggle('primary', data.running);
+  $('difi-host').disabled = data.running;
+  $('difi-port').disabled = data.running;
+  if (!data.running) { $('difi-host').value = data.host; $('difi-port').value = data.port; }
+
+  if (data.running && !difiTimer) difiTimer = setInterval(loadDifi, 1000);
+  if (!data.running && difiTimer) { clearInterval(difiTimer); difiTimer = null; }
+
+  showMsg($('difi-msg'), data.bind_error || '', 'error');
+
+  const packets = data.streams.reduce((sum, s) => sum + s.total_packets, 0);
+  const violations = data.streams.reduce((sum, s) => sum + s.error_count, 0);
+  $('difi-summary').innerHTML = `
+    <div class="stat"><div class="k">Streams</div><div class="v">${data.streams.length}</div></div>
+    <div class="stat"><div class="k">Packets</div><div class="v">${packets.toLocaleString()}</div></div>
+    <div class="stat"><div class="k">Violations</div><div class="v">${violations.toLocaleString()}</div></div>
+    <div class="stat"><div class="k">Malformed</div><div class="v">${data.malformed.toLocaleString()}</div></div>
+  `;
+
+  $('difi-streams').innerHTML = data.streams.length
+    ? data.streams.map(s => {
+        const ctx = s.context, sig = s.signal;
+        const line = `data ${s.counts.data ?? 0} (ok ${s.conforming.data ?? 0}) · context ${s.counts.context ?? 0} · `
+          + `version ${s.counts.version ?? 0} · loss ${fmt(s.loss_percent, 2)}%`
+          + (s.throughput_mbps ? ` · ${fmt(s.throughput_mbps, 2)} Mb/s` : '');
+
+        const rf = ctx ? `
+          <div class="live rf-params">
+            <div class="stat"><div class="k">RF freq</div><div class="v small">${fmt(ctx.rf_freq_hz / 1e6, 3)} MHz</div></div>
+            <div class="stat"><div class="k">IF freq</div><div class="v small">${fmt(ctx.if_freq_hz / 1e6, 3)} MHz</div></div>
+            <div class="stat"><div class="k">Bandwidth</div><div class="v small">${fmt(ctx.bandwidth_hz / 1e6, 3)} MHz</div></div>
+            <div class="stat"><div class="k">Sample rate</div><div class="v small">${fmt(ctx.sample_rate_sps / 1e6, 3)} MSa/s</div></div>
+            <div class="stat"><div class="k">Gain (1/2)</div><div class="v small">${fmt(ctx.gain_stage1_db, 2)} / ${fmt(ctx.gain_stage2_db, 2)} dB</div></div>
+            <div class="stat"><div class="k">Ref level</div><div class="v small">${fmt(ctx.reference_level_dbm, 2)} dBm</div></div>
+            <div class="stat"><div class="k">Format</div><div class="v small">${ctx.data_item_size}-bit ${ctx.real_complex_type}</div></div>
+            ${sig ? `<div class="stat"><div class="k">Signal</div><div class="v small">${fmt(sig.rms_dbfs, 2)} / ${fmt(sig.peak_dbfs, 2)} dBFS</div></div>` : ''}
+          </div>` : '';
+
+        return `<div class="renew-sat" style="grid-template-columns:1fr">
+          <div class="id">stream ${s.stream_id} — ${s.total_packets.toLocaleString()} packets`
+          + `${s.error_count ? `, ${s.error_count.toLocaleString()} violation(s)` : ''}</div>
+          <div class="when">${line}</div>
+          ${rf}
+        </div>`;
+      }).join('')
+    : `<div class="empty">${data.running ? 'Listening — no DIFI packets received yet.' : 'Receiver is stopped.'}</div>`;
+
+  if (data.running && data.streams.length) {
+    updateDifiWaterfallAxis(data.streams[0].context);
+    startDifiWaterfall(data.streams[0].stream_id);
+  } else {
+    stopDifiWaterfall();
+  }
+}
+
+/* ---------------- DIFI waterfall ---------------- */
+/* The receiver computes FFT frames server-side and hands over only the new
+   ones since our last poll (by sequence number), so the canvas just has to
+   scroll each new row in — no client-side FFT or backlog bookkeeping. */
+
+let difiWfStreamId = null;
+let difiWfSeq = 0;
+let difiWfTimer = null;
+
+function difiWfColor(db) {
+  // Fixed -100..-20 dBFS range: comfortably covers the synthetic test signals
+  // and typical downconverted IF levels without per-frame auto-scaling.
+  const stops = [[8, 15, 26], [29, 127, 112], [53, 224, 195], [255, 180, 84], [255, 107, 107]];
+  const t = Math.max(0, Math.min(1, (db + 100) / 80));
+  const pos = t * (stops.length - 1);
+  const i = Math.min(Math.floor(pos), stops.length - 2);
+  const frac = pos - i;
+  const [r1, g1, b1] = stops[i], [r2, g2, b2] = stops[i + 1];
+  return `rgb(${Math.round(r1 + (r2 - r1) * frac)},${Math.round(g1 + (g2 - g1) * frac)},${Math.round(b1 + (b2 - b1) * frac)})`;
+}
+
+function difiPushRow(bins) {
+  const canvas = $('difi-waterfall');
+  const c = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  c.drawImage(canvas, 0, 0, w, h - 1, 0, 1, w, h - 1);
+  for (let i = 0; i < bins.length; i++) {
+    c.fillStyle = difiWfColor(bins[i]);
+    c.fillRect(i, 0, 1, 1);
+  }
+}
+
+function updateDifiWaterfallAxis(ctx) {
+  if (!ctx || !ctx.sample_rate_sps) return;
+  const half = ctx.sample_rate_sps / 2e6;
+  $('difi-wf-lo').textContent = `${fmt(-half, 2)} MHz`;
+  $('difi-wf-mid').textContent = `IF ${fmt(ctx.if_freq_hz / 1e6, 3)} MHz`;
+  $('difi-wf-hi').textContent = `+${fmt(half, 2)} MHz`;
+}
+
+async function difiWfPoll() {
+  if (!difiWfStreamId) return;
+  try {
+    const data = await api(`/api/difi/waterfall?stream_id=${encodeURIComponent(difiWfStreamId)}&since=${difiWfSeq}`);
+    for (const frame of data.frames) difiPushRow(frame.bins);
+    if (data.frames.length) difiWfSeq = data.latest_seq;
+  } catch { /* transient poll errors aren't worth surfacing on top of the status message */ }
+}
+
+function startDifiWaterfall(streamId) {
+  $('difi-waterfall-wrap').hidden = false;
+  if (streamId !== difiWfStreamId) {
+    difiWfStreamId = streamId;
+    difiWfSeq = 0;
+    const canvas = $('difi-waterfall');
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  }
+  if (!difiWfTimer) difiWfTimer = setInterval(difiWfPoll, 200);
+}
+
+function stopDifiWaterfall() {
+  $('difi-waterfall-wrap').hidden = true;
+  if (difiWfTimer) { clearInterval(difiWfTimer); difiWfTimer = null; }
+  difiWfStreamId = null;
+}
+
+async function loadDifi() {
+  try {
+    renderDifi(await api('/api/difi'));
+  } catch (err) {
+    showMsg($('difi-msg'), err.message);
+  }
+}
+
+async function toggleDifi() {
+  const btn = $('difi-toggle');
+  btn.disabled = true;
+  try {
+    if (difiRunning) {
+      await api('/api/difi', { enabled: false });
+    } else {
+      await api('/api/difi', {
+        enabled: true,
+        host: $('difi-host').value.trim() || '0.0.0.0',
+        port: Number($('difi-port').value) || 4991,
+      });
+    }
+    await loadDifi();
+  } catch (err) {
+    showMsg($('difi-msg'), err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------------- wiring ---------------- */
 
 function syncModeVisibility() {
@@ -1333,6 +1524,7 @@ function syncModeVisibility() {
 $('sat-mode').addEventListener('change', syncModeVisibility);
 $('params').addEventListener('submit', generate);
 $('live-toggle').addEventListener('click', toggleLive);
+$('difi-toggle').addEventListener('click', toggleDifi);
 $('reload-files').addEventListener('click', () => loadGpFiles($('gp-file').value.split('|')[0]));
 
 $('w-duration').addEventListener('input', renderPointCount);
@@ -1452,6 +1644,7 @@ document.querySelectorAll('.tabs button').forEach(btn => {
       // is only needed to keep it updating.
       if (!liveTimer && !lastLive) livePoll();
     }
+    if (btn.dataset.tab === 'difi') loadDifi();
   });
 });
 
@@ -1474,6 +1667,7 @@ window.addEventListener('resize', () => {
   await loadGpFiles(preferred);
   loadRenew();
   setInterval(loadRenew, 60000);   // keeps the "next in …" countdown honest
+  loadDifi();
   try {
     const h = await api('/api/health');
     $('server-status').textContent = `server OK · ${h.time} UTC`;

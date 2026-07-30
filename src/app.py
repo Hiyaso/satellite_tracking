@@ -33,6 +33,7 @@ from acu import (  # noqa: E402  (path setup must happen first)
 )
 from fetch_tle import fetch_gp_by_norad_id  # noqa: E402
 from tle_renew import TleRenewer  # noqa: E402
+from difi_monitor import DifiMonitor  # noqa: E402
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -41,6 +42,10 @@ CORS(app)
 # Started from __main__ so the debug reloader's parent process does not run a
 # second copy of the thread.
 renewer = TleRenewer(DATA_DIR, fetch_gp_by_norad_id)
+
+# Background DIFI/VITA 49.2 receiver backing the console's DIFI tab. Off by
+# default: it binds a UDP port, so it only starts when asked to from the UI.
+difi_monitor = DifiMonitor()
 
 # Guard rails so a mistyped step/duration in the UI cannot ask for a gigabyte of JSON.
 # The console shows this count as you set the window, and reports it back in
@@ -527,6 +532,43 @@ def tle_renew_run():
         message = "; ".join(f"{s['norad_id']}: {s['error']}" for s in failed)
         return jsonify({"status": "error", "message": f"CelesTrak fetch failed: {message}"} | status), 502
     return jsonify({"status": "success"} | status)
+
+
+@app.route("/api/difi", methods=["GET", "POST"])
+def difi_status():
+    """Read or control the background DIFI receiver behind the console's DIFI tab."""
+    if request.method == "GET":
+        return jsonify({"status": "success"} | difi_monitor.status())
+
+    body = request.get_json(silent=True) or {}
+    port = body.get("port")
+    if port is not None:
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            raise RequestError(f"DIFI port must be an integer, got {port!r}")
+
+    try:
+        if "host" in body or "port" in body:
+            difi_monitor.configure(body.get("host"), port)
+        if "enabled" in body:
+            difi_monitor.start() if body["enabled"] else difi_monitor.stop()
+    except RuntimeError as exc:
+        raise RequestError(str(exc))
+
+    return jsonify({"status": "success"} | difi_monitor.status())
+
+
+@app.route("/api/difi/waterfall")
+def difi_waterfall():
+    """New FFT frames for one stream, polled by the DIFI tab's waterfall canvas."""
+    raw_id = request.args.get("stream_id", "")
+    try:
+        stream_id = int(raw_id, 16) if raw_id.lower().startswith("0x") else int(raw_id)
+    except ValueError:
+        raise RequestError(f"stream_id must be an integer (e.g. 0x00000000), got {raw_id!r}")
+    since = int(_number(request.args.get("since"), "since", 0))
+    return jsonify({"status": "success"} | difi_monitor.waterfall(stream_id, since))
 
 
 @app.route("/api/track", methods=["POST"])
