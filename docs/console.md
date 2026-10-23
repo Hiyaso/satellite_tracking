@@ -3,13 +3,26 @@
 [← README](../README.md) · **Console** · [CLI](cli.md) · [DIFI](difi.md)
 
 ```bash
-python src/app.py                              # http://127.0.0.1:8000/
-python src/app.py --host 0.0.0.0 --port 9000   # reachable from other machines
-python src/app.py --debug                      # Flask auto-reload while editing
+python src/server/app.py                              # http://127.0.0.1:8000/
+python src/server/app.py --host 0.0.0.0 --port 9000   # reachable from other machines
+python src/server/app.py --debug                      # Flask auto-reload while editing
 ```
 
-`app.py` serves `index.html` and `world.js` itself, so there is no separate web
-server, no build step, and no CDN — the page works offline.
+`app.py` serves the page in `src/web/` (`index.html`, `css/`, `js/`) itself, so
+there is no separate web server, no build step, and no CDN — the page works offline.
+
+## Page layout
+
+- **Left column** — the *ACU Parameters* form, with **Generate Az/El**, **Live**,
+  **Save preset** and **Reset** pinned to the bottom of the screen so they stay
+  reachable however far you scroll. *Pedestal limits & biases* is folded away by
+  default; click its heading to open it. Below the form, the *Element-set
+  renewal* panel manages the files in `data/` (see
+  [Automatic element-set renewal](#automatic-element-set-renewal)).
+- **Right column** — the output tabs: **Live**, **Track**, **Data**, **Passes**.
+  The console opens on **Live**, since live tracking starts as soon as the server
+  answers. Pressing **Generate** from the Live tab switches to **Track**; from
+  Data or Passes it stays where you are.
 
 > The console has no authentication and lets any visitor read files from `data/`
 > and trigger CelesTrak fetches, so only use `--host 0.0.0.0` on a trusted network.
@@ -42,7 +55,7 @@ much, and names a step that fits:
 ```
 
 The suggested step is always rounded up, so applying it genuinely lands under the
-cap. The limit itself is `MAX_SAMPLES` in `src/app.py`, served to the page via
+cap. The limit itself is `MAX_SAMPLES` in `src/server/app.py`, served to the page via
 `/api/health`.
 
 ## What you get back
@@ -50,7 +63,6 @@ cap. The limit itself is `MAX_SAMPLES` in `src/app.py`, served to the page via
 - **Track** — summary tiles (samples, time above mask, max elevation, min range, peak axis rates, limit hits), a sky plot of the pass with the mask ring, and a commanded az/el timeline. Arrowheads along the sky track show the direction of travel, so a pass that doubles back in azimuth is not ambiguous. Segments where the antenna is not tracking are drawn faintly.
 - **Data** — the full sample table: time, true az/el, commanded az/el, axis rates, slant range, and per-sample flags. Download as CSV or JSON.
 - **Passes** — AOS / TCA / LOS with times, azimuths, peak elevation, and duration. Click a pass to narrow every other view to it (see [Choosing a pass](#choosing-a-pass)).
-- **Live** — a world map, plus tiles for true az/el, commanded az/el, slant range, ACU state, sub-satellite latitude/longitude and altitude, polled once per second.
 
 `Save preset` keeps the current parameters in the browser's local storage so they
 come back on the next visit.
@@ -88,7 +100,7 @@ Opening the **Live** tab plots the satellite's position straight away; press
 - your ground station, and a dashed great-circle line to the satellite while it is above the horizon (green once it is above the mask);
 - day/night shading, so you can tell whether the pass is in sunlight.
 
-Coastlines are baked into `src/world.js`, so the map needs no tile server and
+Coastlines are baked into `src/web/js/world.js`, so the map needs no tile server and
 works offline. It is deliberately coarse — a position reference, not a chart.
 The map is an equirectangular projection, so shapes stretch badly near the poles;
 that is normal for a ground-track plot and keeps longitude/latitude readable
@@ -119,7 +131,7 @@ passes the plain 0-360° bearing is shown unless the travel range forbids it.
 | Endpoint | Body | Returns |
 |---|---|---|
 | `GET /` | — | The console page |
-| `GET /world.js` | — | Coastline data for the live map |
+| `GET /css/<file>`, `GET /js/<file>` | — | The page's stylesheet and scripts, including `js/world.js` (coastline data for the live map) |
 | `GET /api/health` | — | Server time |
 | `GET /api/gp-files` | — | GP/OMM element files found in `data/` |
 | `POST /api/fetch-tle` | `{ "norad_id" }` | Fetches from CelesTrak, saves to `data/`, returns the element summary |
@@ -175,7 +187,7 @@ needs:
 `ground_track` spans half an orbit before the sample and three orbits after it —
 281 points at 80 per revolution — and is `null` if the element set cannot be
 propagated over that span. Change the span with `TRACK_PAST_REVS` /
-`TRACK_FUTURE_REVS` in `src/app.py`; the point count follows from them, so the
+`TRACK_FUTURE_REVS` in `src/server/app.py`; the point count follows from them, so the
 track keeps its resolution rather than stretching the same points further. Split
 the future part into revolutions with `period_minutes × 60 / step_seconds`, which
 is how the console shades each orbit differently.
@@ -191,7 +203,7 @@ hard-coding them.
 Element sets go stale — CelesTrak republishes GP data a few times a day, and SGP4
 accuracy falls off either side of the epoch. The console renews the files in
 `data/` on a schedule, twice a day by default, from a background thread started
-with the server. The *Automatic renewal* box in the parameter panel turns it on
+with the server. The *Element-set renewal* panel below the parameter form turns it on
 or off, sets the rate, and lists each satellite with its epoch, last renewal, and
 time until the next one; *Renew now* fetches immediately.
 

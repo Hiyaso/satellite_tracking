@@ -4,20 +4,20 @@
 
 `acu.py`, `acu_rt.py` and `fetch_tle.py` do the same job as the console without a browser, and the engine behind them is importable.
 
-## `src/acu.py` — command-line az/el calculator
+## `src/tracking/acu.py` — command-line az/el calculator
 
 ### Basic usage
 
 Run with no arguments to try a sample ISS TLE against a default ground station (Taipei):
 
 ```bash
-python src/acu.py
+python src/tracking/acu.py
 ```
 
 ### Specify your own satellite and ground station
 
 ```bash
-python src/acu.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --lon 121.5654 --elev 0
+python src/tracking/acu.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --lon 121.5654 --elev 0
 ```
 
 ### Specify a date/time
@@ -25,7 +25,7 @@ python src/acu.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --l
 Use `--when` with an ISO 8601 timestamp (UTC if no offset is given). Defaults to now.
 
 ```bash
-python src/acu.py --when 2026-08-01T00:00:00Z
+python src/tracking/acu.py --when 2026-08-01T00:00:00Z
 ```
 
 ### Sweep a full day
@@ -33,7 +33,7 @@ python src/acu.py --when 2026-08-01T00:00:00Z
 Add `--day` to compute az/el at regular intervals across 24 hours starting at `--when` (or now). Control the interval with `--step-seconds` (default 60).
 
 ```bash
-python src/acu.py --day --step-seconds 3600 --when 2026-08-01T00:00:00Z
+python src/tracking/acu.py --day --step-seconds 3600 --when 2026-08-01T00:00:00Z
 ```
 
 ### Export to JSON
@@ -44,13 +44,13 @@ Relative filenames are written under the project's `data/` folder (created autom
 
 ```bash
 # Writes to data/azel.json
-python src/acu.py --day --step-seconds 60 --output azel.json
+python src/tracking/acu.py --day --step-seconds 60 --output azel.json
 
 # --output with no filename also defaults to data/azel.json
-python src/acu.py --day --output
+python src/tracking/acu.py --day --output
 
 # Writes to data/passes/iss.json
-python src/acu.py --output passes/iss.json
+python src/tracking/acu.py --output passes/iss.json
 ```
 
 ### Use a GP (OMM) element set instead of a TLE
@@ -58,7 +58,7 @@ python src/acu.py --output passes/iss.json
 Pass `--gp-file` pointing to a CelesTrak/Space-Track GP file (JSON, XML, or CSV — inferred from the extension, or set explicitly with `--gp-format`):
 
 ```bash
-python src/acu.py --gp-file iss.json --day --output azel.json
+python src/tracking/acu.py --gp-file iss.json --day --output azel.json
 ```
 
 If the file contains multiple satellites, the first one is used.
@@ -76,26 +76,26 @@ If the file contains multiple satellites, the first one is used.
 | `--step-seconds` | Interval between samples when `--day` is set (default: 60) |
 | `--output`, `-o` | Write the result as JSON. Relative paths go under `data/` (default filename `azel.json` if no path given) |
 
-## `src/acu_rt.py` — real-time az/el tracker
+## `src/tracking/acu_rt.py` — real-time az/el tracker
 
 Continuously recalculates and prints the satellite's azimuth/elevation for the current time, refreshing in place on a fixed interval, until you stop it with Ctrl+C (or `--duration` elapses).
 
 ### Basic usage
 
 ```bash
-python src/acu_rt.py
+python src/tracking/acu_rt.py
 ```
 
 ### Custom satellite, ground station, and refresh rate
 
 ```bash
-python src/acu_rt.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --lon 121.5654 --interval 1
+python src/tracking/acu_rt.py --line1 "1 25544U ..." --line2 "2 25544 ..." --lat 25.0330 --lon 121.5654 --interval 1
 ```
 
 ### Stop automatically after a fixed duration
 
 ```bash
-python src/acu_rt.py --duration 30
+python src/tracking/acu_rt.py --duration 30
 ```
 
 ### Use a GP (OMM) element set instead of a TLE
@@ -103,7 +103,7 @@ python src/acu_rt.py --duration 30
 Same as `acu.py` — pass `--gp-file` (and optionally `--gp-format`):
 
 ```bash
-python src/acu_rt.py --gp-file iss.json --interval 5
+python src/tracking/acu_rt.py --gp-file iss.json --interval 5
 ```
 
 ### All options
@@ -119,7 +119,7 @@ python src/acu_rt.py --gp-file iss.json --interval 5
 
 Note: `acu_rt.py` always tracks the real current time — there's no `--when` or `--output`; use `acu.py` for a specific timestamp, a 24-hour sweep, or JSON export. For a live readout with pedestal limits applied, use the console's **Live** tab.
 
-## `src/fetch_tle.py` — refresh GP/TLE data from CelesTrak
+## `src/tracking/fetch_tle.py` — refresh GP/TLE data from CelesTrak
 
 Downloads the latest GP (OMM) element set for a satellite from CelesTrak by NORAD catalog number and saves it as JSON under `data/`, ready to hand to `--gp-file` on `acu.py` or `acu_rt.py`, or to pick from the console's element-file list.
 
@@ -127,20 +127,20 @@ Downloads the latest GP (OMM) element set for a satellite from CelesTrak by NORA
 
 ```bash
 # Fetches the ISS (NORAD 25544) by default -> data/gp_25544.json
-python src/fetch_tle.py
+python src/tracking/fetch_tle.py
 ```
 
 ### Fetch a different satellite
 
 ```bash
-python src/fetch_tle.py --norad-id 33591 --output noaa19.json
+python src/tracking/fetch_tle.py --norad-id 33591 --output noaa19.json
 ```
 
 Then use the result:
 
 ```bash
-python src/acu.py --gp-file data/gp_25544.json --day --output azel.json
-python src/acu_rt.py --gp-file data/gp_25544.json
+python src/tracking/acu.py --gp-file data/gp_25544.json --day --output azel.json
+python src/tracking/acu_rt.py --gp-file data/gp_25544.json
 ```
 
 ### All options
@@ -161,7 +161,7 @@ On Windows, schedule it with Task Scheduler:
 
 ```powershell
 $venvPython  = "C:\path\to\satellite_tracking\.venv\Scripts\python.exe"
-$scriptPath  = "C:\path\to\satellite_tracking\src\fetch_tle.py"
+$scriptPath  = "C:\path\to\satellite_tracking\src\tracking\fetch_tle.py"
 $projectRoot = "C:\path\to\satellite_tracking"
 
 $Action   = New-ScheduledTaskAction -Execute $venvPython -Argument "`"$scriptPath`"" -WorkingDirectory $projectRoot
@@ -182,7 +182,7 @@ Get-ScheduledTaskInfo -TaskName "SatelliteTracking-FetchTLE" # last run time/res
 Unregister-ScheduledTask -TaskName "SatelliteTracking-FetchTLE" -Confirm:$false  # remove
 ```
 
-On Linux/macOS, use a cron entry instead, e.g. `0 0,12 * * * /path/to/.venv/bin/python /path/to/src/fetch_tle.py`.
+On Linux/macOS, use a cron entry instead, e.g. `0 0,12 * * * /path/to/.venv/bin/python /path/to/src/tracking/fetch_tle.py`.
 
 ## Using `acu.py` as a library
 
@@ -191,7 +191,7 @@ import it directly:
 
 ```python
 import sys
-sys.path.insert(0, "src")
+sys.path.insert(0, "src/tracking")
 
 from acu import (
     build_satellite, calculate_az_el_series, calculate_ground_track,

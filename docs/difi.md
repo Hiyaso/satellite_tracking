@@ -1,4 +1,4 @@
-# `src/difi_tx.py` / `src/difi_rx.py` — DIFI / VITA 49.2 digitised IF
+# `src/difi/difi_tx.py` / `src/difi/difi_rx.py` — DIFI / VITA 49.2 digitised IF
 
 [← README](../README.md) · [Console](console.md) · [CLI](cli.md) · **DIFI**
 
@@ -11,10 +11,10 @@ Both are pure standard library — nothing to add to `config/requirements.txt`.
 
 ```bash
 # terminal 1 — receive and validate
-python src/difi_rx.py --bind 0.0.0.0:4991 --measure-signal
+python src/difi/difi_rx.py --bind 0.0.0.0:4991 --measure-signal
 
 # terminal 2 — transmit a 1 MSPS 16-bit tone for 10 seconds
-python src/difi_tx.py --dest 127.0.0.1:4991 --duration 10
+python src/difi/difi_tx.py --dest 127.0.0.1:4991 --duration 10
 ```
 
 ## The three packet types
@@ -38,7 +38,7 @@ standard requires.
 ## Transmitter
 
 ```bash
-python src/difi_tx.py --dest 127.0.0.1:4991 \
+python src/difi/difi_tx.py --dest 127.0.0.1:4991 \
     --sample-rate 1e6 --rf-freq 1.95e9 --bit-depth 16 \
     --signal tone --tone-freq 250e3 --amplitude 0.5 --duration 10
 ```
@@ -70,7 +70,7 @@ allowed but warned about, since it needs jumbo frames to avoid fragmenting.
 ## Receiver
 
 ```bash
-python src/difi_rx.py --bind 0.0.0.0:4991 --measure-signal --duration 30
+python src/difi/difi_rx.py --bind 0.0.0.0:4991 --measure-signal --duration 30
 ```
 
 | Option | Purpose |
@@ -107,7 +107,7 @@ and timestamp monotonicity across packets.
 Transmitting a 1 MSPS 16-bit tone for three seconds:
 
 ```
-$ python src/difi_tx.py --dest 127.0.0.1:4991 --duration 3 --tone-freq 250e3
+$ python src/difi/difi_tx.py --dest 127.0.0.1:4991 --duration 3 --tone-freq 250e3
 DIFI transmitter -> 127.0.0.1:4991
   stream ID        0x00000000
   sample rate      1,000,000 Sa/s   bandwidth 800,000 Hz
@@ -125,7 +125,7 @@ sent 8,334 data packets / 3,000,240 samples in 3.00s
 and the matching receiver:
 
 ```
-$ python src/difi_rx.py --bind 0.0.0.0:4991 --measure-signal
+$ python src/difi/difi_rx.py --bind 0.0.0.0:4991 --measure-signal
 ====================================================================
 DIFI receive summary
 ====================================================================

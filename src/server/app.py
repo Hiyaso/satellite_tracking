@@ -1,7 +1,7 @@
 """Flask backend for the ACU web console.
 
-Serves `index.html` and exposes the az/el engine in `acu.py` over HTTP so the
-browser UI can configure ACU parameters and get look-angle data back.
+Serves the page in `src/web/` and exposes the az/el engine in
+`src/tracking/acu.py` over HTTP so the browser UI can configure ACU parameters and get look-angle data back.
 """
 
 from __future__ import annotations
@@ -18,9 +18,12 @@ from typing import Any, Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-SRC_DIR = Path(__file__).resolve().parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+SERVER_DIR = Path(__file__).resolve().parent
+TRACKING_DIR = SERVER_DIR.parent / "tracking"
+WEB_DIR = SERVER_DIR.parent / "web"
+for _path in (SERVER_DIR, TRACKING_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from acu import (  # noqa: E402  (path setup must happen first)
     DATA_DIR,
@@ -426,13 +429,15 @@ def _handle_request_error(exc: RequestError):
 
 @app.route("/")
 def index():
-    return send_from_directory(SRC_DIR, "index.html")
+    return send_from_directory(WEB_DIR, "index.html")
 
 
-@app.route("/world.js")
-def world_outline():
-    """Coastline data for the live map, kept out of index.html for readability."""
-    return send_from_directory(SRC_DIR, "world.js", mimetype="text/javascript")
+@app.route("/css/<path:filename>")
+@app.route("/js/<path:filename>")
+def web_asset(filename: str):
+    """Stylesheets and scripts for the page; send_from_directory refuses traversal."""
+    folder = request.path.split("/")[1]
+    return send_from_directory(WEB_DIR / folder, filename)
 
 
 @app.route("/api/health")

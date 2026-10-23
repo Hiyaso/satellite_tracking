@@ -7,9 +7,9 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Project layout is <root>/src/fetch_tle.py and <root>/data/, so resolve the
+# Project layout is <root>/src/tracking/fetch_tle.py and <root>/data/, so resolve the
 # data directory relative to this file rather than the current working directory.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 CELESTRAK_GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
 

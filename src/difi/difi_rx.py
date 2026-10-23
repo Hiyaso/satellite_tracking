@@ -11,8 +11,8 @@ signal statistics.
 
 Pair it with `difi_tx.py`:
 
-    python src/difi_rx.py --bind 0.0.0.0:4991
-    python src/difi_tx.py --dest 127.0.0.1:4991 --duration 10
+    python src/difi/difi_rx.py --bind 0.0.0.0:4991
+    python src/difi/difi_tx.py --dest 127.0.0.1:4991 --duration 10
 
 Only the standard library is used -- no extra dependencies beyond what
 `config/requirements.txt` already installs.

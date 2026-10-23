@@ -13,7 +13,7 @@ on the receiving end.
 
 Everything on the wire is big-endian. All words are 32 bits.
 
-    python src/difi_tx.py --dest 127.0.0.1:4991 --duration 10
+    python src/difi/difi_tx.py --dest 127.0.0.1:4991 --duration 10
 
 Only the standard library is used -- no extra dependencies beyond what
 `config/requirements.txt` already installs.

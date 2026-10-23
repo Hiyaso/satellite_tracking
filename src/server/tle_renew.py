@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 CONFIG_PATH = CONFIG_DIR / "tle_renew.json"
 
 DEFAULT_INTERVAL_HOURS = 12.0        # twice a day

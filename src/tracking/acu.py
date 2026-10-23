@@ -10,9 +10,9 @@ from typing import Optional
 from sgp4 import omm
 from skyfield.api import EarthSatellite, load, wgs84
 
-# Project layout is <root>/src/acu.py and <root>/data/, so resolve the data
+# Project layout is <root>/src/tracking/acu.py and <root>/data/, so resolve the data
 # directory relative to this file rather than the current working directory.
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 
 def build_satellite(
